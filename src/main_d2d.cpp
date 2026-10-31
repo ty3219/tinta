@@ -3,6 +3,7 @@
 // Much faster startup than OpenGL
 
 #include "app.h"
+#include "win7_compat.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -36,7 +37,6 @@
 #include "editrail.h"
 #include "startpage.h"
 
-#include <appmodel.h>
 #include <winhttp.h>
 #include <thread>
 #pragma comment(lib, "winhttp.lib")
@@ -1092,9 +1092,9 @@ render_document:
 // surfaces as a small dismissable chip in the corner, never a dialog.
 
 static bool isStorePackaged() {
-    UINT32 length = 0;
-    return GetCurrentPackageFullName(&length, nullptr) !=
-           APPMODEL_ERROR_NO_PACKAGE;
+    // Resolved at runtime: on Windows 7 the API does not exist and there are
+    // no packaged apps, so this reads false.
+    return win7compat::runningAsPackagedApp();
 }
 
 static std::string todayString() {
@@ -1913,8 +1913,9 @@ static LONG WINAPI writeCrashDump(EXCEPTION_POINTERS* exceptionInfo) {
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     SetUnhandledExceptionFilter(writeCrashDump);
-    // Enable per-monitor DPI V2 awareness
-    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    // Enable per-monitor DPI V2 awareness (Windows 10 1703+); on Windows 7
+    // the shim falls back to system-DPI awareness.
+    win7compat::setPerMonitorV2DpiAwareness();
 
     auto startupStart = Clock::now();
 
@@ -2161,8 +2162,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     app.metrics.windowInitUs = usElapsed(t0);
 
-    // Get DPI using per-monitor aware API
-    app.contentScale = GetDpiForWindow(app.hwnd) / 96.0f;
+    // Get the DPI (per-monitor on Windows 10, system DPI on Windows 7)
+    app.contentScale = win7compat::windowDpi(app.hwnd) / 96.0f;
 
     // Theme the native title bar before the window is ever shown
     applyWindowChrome(app);

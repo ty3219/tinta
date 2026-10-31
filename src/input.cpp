@@ -2,6 +2,7 @@
 #include "input.h"
 #include "link_target.h"
 #include "network_path.h"
+#include "win7_compat.h"
 #include "annotations.h"
 #include "drafts.h"
 #include "editrail.h"
@@ -1110,9 +1111,9 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             cancelAppMenuPress(app, hwnd);
             return;
         }
-        const UINT windowDpi = GetDpiForWindow(hwnd);
-        const int thresholdX = std::max(1, GetSystemMetricsForDpi(SM_CXDRAG, windowDpi));
-        const int thresholdY = std::max(1, GetSystemMetricsForDpi(SM_CYDRAG, windowDpi));
+        const UINT windowDpi = win7compat::windowDpi(hwnd);
+        const int thresholdX = std::max(1, win7compat::systemMetricsForDpi(SM_CXDRAG, windowDpi));
+        const int thresholdY = std::max(1, win7compat::systemMetricsForDpi(SM_CYDRAG, windowDpi));
         if (std::abs(app.mouseX - app.appMenuPressPoint.x) >= thresholdX ||
             std::abs(app.mouseY - app.appMenuPressPoint.y) >= thresholdY) {
             POINT screen = app.appMenuPressPoint;

@@ -165,6 +165,14 @@ if(BUILD_TESTING)
     target_include_directories(keymap_tests PRIVATE include)
     add_test(NAME keymap COMMAND keymap_tests)
 
+    # The portable exe must start on Windows 7: no static imports of the
+    # Windows 8/10-only APIs. This scan fails if any source file (outside the
+    # win7_compat.h shims) calls them directly. Pure C++ so it builds anywhere.
+    add_executable(win7_compat_tests tests/win7_compat_tests.cpp)
+    target_compile_definitions(win7_compat_tests PRIVATE
+        TINTA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME win7_compat COMMAND win7_compat_tests)
+
     # Exercise the real input handlers and editor with a message-only test
     # window, including layout-dependent character sequences (#195).
     set(INPUT_TEST_SOURCES ${SOURCES})

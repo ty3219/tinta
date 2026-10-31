@@ -8,6 +8,7 @@
 #include "search.h"
 #include "search_panel.h"
 #include "overlays.h"
+#include "win7_compat.h"
 
 #include "document.h"
 #include "drafts.h"
@@ -2105,7 +2106,7 @@ void tabWindowDropMerge(App& app, HWND hwnd) {
         if (!GetWindowRect(w, &r) || !PtInRect(&r, cursor)) continue;
         // Only the strip band counts as a drop zone; anywhere lower is
         // an ordinary overlapping window placement
-        UINT targetDpi = GetDpiForWindow(w);
+        UINT targetDpi = win7compat::windowDpi(w);
         if (cursor.y > r.top + MulDiv(46, (int)targetDpi, 96)) break;
         target = w;
         break;

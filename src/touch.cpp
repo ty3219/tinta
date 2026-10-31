@@ -2,6 +2,7 @@
 // press selects. Suggested by @SHM-white. See touch.h.
 #include "touch.h"
 
+#include "win7_compat.h"
 #include "editor.h"
 #include "input.h"
 #include "overlays.h"
@@ -414,9 +415,9 @@ bool handlePointerMessage(App& app, HWND hwnd, UINT msg, WPARAM wParam, LPARAM) 
         return false;
     }
     POINTER_INPUT_TYPE type = PT_POINTER;
-    if (!GetPointerType(pointer, &type) || type != PT_TOUCH) return false;
+    if (!win7compat::pointerType(pointer, &type) || type != PT_TOUCH) return false;
     POINTER_INFO info{};
-    if (!GetPointerInfo(pointer, &info)) return false;
+    if (!win7compat::pointerInfo(pointer, &info)) return false;
     POINT pt = info.ptPixelLocation;
     ScreenToClient(hwnd, &pt);
     double ms = touchClockMs();

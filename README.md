@@ -49,6 +49,13 @@ scoop bucket add tinta https://github.com/oipoistar/scoop-bucket
 scoop install tinta
 ```
 
+**Windows 7 SP1:** the portable exe starts and runs on Windows 7 SP1 (64-bit).
+Reading, editing, themes, search and tabs work as on Windows 10. A few
+Direct2D 1.1 features — print/PDF export, SVG images and color emoji — need
+the [Platform Update for Windows 7](https://support.microsoft.com/kb/2670838)
+and otherwise degrade gracefully; the Store/MSIX route does not apply to
+Windows 7.
+
 ## Why Tinta?
 
 Most markdown apps ship an entire browser to render text. Tinta uses the GPU-accelerated text stack already built into Windows:

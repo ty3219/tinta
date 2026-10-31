@@ -1,11 +1,11 @@
 #include "settings.h"
 #include "document.h"
 #include "i18n.h"
+#include "win7_compat.h"
 
 #include <windows.h>
 #include <shlobj.h>
 #include <shellapi.h>
-#include <appmodel.h>
 #include <fstream>
 #include <string>
 
@@ -474,8 +474,8 @@ Settings loadSettings() {
 // Packaged (MSIX/Store) installs declare file associations in AppxManifest.xml;
 // runtime registry writes would only land in the package's virtual registry.
 static bool isRunningPackaged() {
-    UINT32 length = 0;
-    return GetCurrentPackageFullName(&length, nullptr) != APPMODEL_ERROR_NO_PACKAGE;
+    // On Windows 7 there are no packaged apps; the shim reads false there.
+    return win7compat::runningAsPackagedApp();
 }
 
 static bool hasRegisteredFileAssociation(std::wstring_view extension) {

@@ -5,6 +5,7 @@
 #include "render.h"
 #include "tabs.h"
 #include "utils.h"
+#include "win7_compat.h"
 
 #include <cmath>
 #include <filesystem>
@@ -35,9 +36,9 @@ LRESULT CALLBACK testProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 void gestures(App& app) {
     const int x = (int)dpi(app, 20), y = (int)dpi(app, 20);
     const LPARAM point = MAKELPARAM(x, y);
-    const UINT windowDpi = GetDpiForWindow(app.hwnd);
-    const int dx = std::max(1, GetSystemMetricsForDpi(SM_CXDRAG, windowDpi));
-    const int dy = std::max(1, GetSystemMetricsForDpi(SM_CYDRAG, windowDpi));
+    const UINT windowDpi = win7compat::windowDpi(app.hwnd);
+    const int dx = std::max(1, win7compat::systemMetricsForDpi(SM_CXDRAG, windowDpi));
+    const int dy = std::max(1, win7compat::systemMetricsForDpi(SM_CYDRAG, windowDpi));
     auto press = [&] { handleMouseDown(app, app.hwnd, MK_LBUTTON, point); };
     auto release = [&](LPARAM at) { handleMouseUp(app, app.hwnd, 0, at); };
     closeContextMenu(app);
