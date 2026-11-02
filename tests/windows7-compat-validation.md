@@ -60,9 +60,12 @@ semantics for the path-joining call sites:
 `tests/win7_compat_tests.cpp` now also fails if `<filesystem>` /
 `std::filesystem` appears in `src/` or `include/` (tests keep it: they run on
 Windows 10/11 CI), and the CI workflow runs `tests/check_win7_imports.ps1`,
-which dumps the built exe's import table with `dumpbin` and fails on any
-Windows 8/10-only import. That check catches static-library imports, not just
-direct source calls.
+which inspects the built exe's import table and fails on any Windows 8/10-only
+import: it runs `dumpbin /imports` when a Visual Studio toolchain is available
+(PATH, the standard install tree, or vswhere), and otherwise falls back to a
+byte scan of the PE import-name strings (which only the library-smuggled names
+trigger, never the win7_compat.h GetProcAddress literals). That check catches
+static-library imports, not just direct source calls.
 
 ## What was checked (static, this workspace)
 
