@@ -81,7 +81,12 @@ performed here:
   Linux; the same target runs in the Windows CI `ctest`.
 - Path helper semantics were checked against `std::filesystem` behavior
   (parent_path, stem, extension, lexically_normal) with a standalone harness
-  before wiring the Win32 implementations.
+  before wiring the Win32 implementations. Two operator/ semantics surfaced
+  during the CI run and were corrected there: `pathJoin` must let an absolute
+  name (drive, UNC, or root-relative) replace the directory instead of gluing
+  the folder in front of it, and `pathNormalize` must keep forward-slash UNC
+  hosts (`//server/share`) intact so `pathHost` still sees the server. The
+  network-path and PlantUML-in-app test suites cover both.
 - Broader audit: no other Windows 8/10-only API calls in the source
   (`GetDpiForMonitor`, `GetSystemTimePreciseAsFileTime`, `SetWindowCompositionAttribute`,
   DPI-context family, appmodel family, `PathCch*`).

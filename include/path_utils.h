@@ -36,6 +36,8 @@ std::wstring pathExtension(const std::wstring& path);
 // "dir\\file.md" -> "dir", "file.md" -> "".
 std::wstring pathParentDir(const std::wstring& path);
 // dir + "\\" + name, with no double separator when dir already ends in one.
+// An absolute name (drive, UNC, or root-relative) replaces the directory,
+// like the standard library's operator/.
 std::wstring pathJoin(const std::wstring& dir, const std::wstring& name);
 // True when the path has no root: relative paths like "images\\a.png" and
 // "..\\a.png", drive-relative "C:a.png"; false for "C:\\...", "\\...",

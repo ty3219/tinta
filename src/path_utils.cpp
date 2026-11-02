@@ -50,12 +50,6 @@ std::wstring pathParentDir(const std::wstring& path) {
     return p.substr(0, sep);
 }
 
-std::wstring pathJoin(const std::wstring& dir, const std::wstring& name) {
-    if (dir.empty()) return name;
-    if (dir.back() == L'\\' || dir.back() == L'/') return dir + name;
-    return dir + L"\\" + name;
-}
-
 bool pathIsRelative(const std::wstring& path) {
     if (path.size() >= 3 && path[1] == L':' &&
         (path[2] == L'\\' || path[2] == L'/')) {
@@ -70,24 +64,39 @@ bool pathIsRelative(const std::wstring& path) {
     return true;
 }
 
+std::wstring pathJoin(const std::wstring& dir, const std::wstring& name) {
+    // An absolute name replaces the directory, exactly as the standard
+    // library's operator/ does: a document's folder must never be glued in
+    // front of a UNC share path or an absolute rendered-artifact path.
+    if (name.empty()) return dir;
+    if (!pathIsRelative(name)) return name;
+    if (dir.empty()) return name;
+    if (dir.back() == L'\\' || dir.back() == L'/') return dir + name;
+    return dir + L"\\" + name;
+}
+
 std::wstring pathNormalize(const std::wstring& path) {
+    const auto isSep = [](wchar_t c) { return c == L'\\' || c == L'/'; };
     // Split off the root prefix, which ".." can never climb above.
     std::wstring root;
     std::wstring rest = path;
     if (rest.size() >= 2 && rest[1] == L':' &&
-        (rest.size() == 2 || rest[2] == L'\\' || rest[2] == L'/')) {
+        (rest.size() == 2 || isSep(rest[2]))) {
         root = rest.substr(0, 2);  // drive name "C:"
         rest = rest.substr(2);
-        if (!rest.empty() && (rest[0] == L'\\' || rest[0] == L'/')) {
+        if (!rest.empty() && isSep(rest[0])) {
             root += L"\\";
             rest = rest.substr(1);
         }
-    } else if (rest.size() >= 2 && rest[0] == L'\\' && rest[1] == L'\\') {
+    } else if (rest.size() >= 2 && isSep(rest[0]) && isSep(rest[1])) {
+        // UNC in either separator style: "\\server\share\..." or
+        // "//server/share/...". The host must survive, or pathHost()
+        // (network_path.h) no longer sees the server the path reaches.
         const size_t sep1 = rest.find_first_of(L"\\/", 2);
         if (sep1 != std::wstring::npos) {
             const size_t sep2 = rest.find_first_of(L"\\/", sep1 + 1);
             if (sep2 != std::wstring::npos) {
-                root = rest.substr(0, sep2 + 1);  // "\\server\share\"
+                root = rest.substr(0, sep2 + 1);  // "\\server\share\" (any slashes)
                 rest = rest.substr(sep2 + 1);
             } else {
                 root = rest;  // "\\server\share" with no trailing separator
@@ -97,7 +106,7 @@ std::wstring pathNormalize(const std::wstring& path) {
             root = rest;  // "\\server"
             rest.clear();
         }
-    } else if (!rest.empty() && (rest[0] == L'\\' || rest[0] == L'/')) {
+    } else if (!rest.empty() && isSep(rest[0])) {
         root = L"\\";
         rest = rest.substr(1);
     }
@@ -127,7 +136,7 @@ std::wstring pathNormalize(const std::wstring& path) {
     std::wstring normalized = root;
     for (const std::wstring& part : parts) {
         if (normalized.empty()) normalized = part;
-        else if (normalized.back() == L'\\') normalized += part;
+        else if (isSep(normalized.back())) normalized += part;
         else normalized += L"\\" + part;
     }
     if (normalized.empty()) normalized = L".";
