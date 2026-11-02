@@ -1,0 +1,43 @@
+name: Build branch (artifact only)
+
+# Build the current branch on GitHub Actions without creating a GitHub
+# Release: the portable exe is attached to the run as a downloadable
+# artifact. Runs automatically on every push to the win7-compat branch,
+# and can also be triggered by hand via the "Run workflow" button in the
+# Actions tab. Pushing a tag never creates a Release from this workflow.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - win7-compat
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        env:
+          CFLAGS: /MP
+          CXXFLAGS: /MP
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      # Runs the full ctest suite, including win7_compat_tests which scans
+      # the sources for direct calls of Windows 8/10-only APIs.
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Upload tinta.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: tinta-win7
+          path: build/Release/tinta.exe
