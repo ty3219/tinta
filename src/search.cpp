@@ -1,11 +1,10 @@
 #include "search.h"
 #include "utils.h"
 #include "render.h"
+#include "path_utils.h"
 
 #include <algorithm>
 #include <cwctype>
-#include <filesystem>
-#include <fstream>
 #include <limits>
 #include <thread>
 
@@ -39,7 +38,7 @@ namespace {
 // One file for the scan, gathered on the UI thread: another tab's path
 // and, while that tab is being edited, its parked buffer
 struct ScanSource {
-    std::filesystem::path path;
+    std::wstring path;
     bool hasText = false;
     std::wstring text;
 };
@@ -80,19 +79,31 @@ App::FolderFileResult scanText(const std::wstring& content,
     return result;
 }
 
-bool readSmallFile(const std::filesystem::path& path, std::wstring& text) {
-    std::error_code ec;
-    auto size = std::filesystem::file_size(path, ec);
-    if (ec || size > 1024 * 1024) return false;
-    std::ifstream file(path, std::ios::binary);
-    if (!file) return false;
-    std::string bytes((std::istreambuf_iterator<char>(file)),
-                      std::istreambuf_iterator<char>());
+bool readSmallFile(const std::wstring& path, std::wstring& text) {
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                           OPEN_EXISTING, 0, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size;
+    if (!GetFileSizeEx(h, &size) || size.QuadPart > 1024 * 1024) {
+        CloseHandle(h);
+        return false;
+    }
+    std::string bytes(static_cast<size_t>(size.QuadPart), '\0');
+    bool ok = true;
+    if (size.QuadPart > 0) {
+        DWORD read = 0;
+        ok = ReadFile(h, bytes.data(), static_cast<DWORD>(size.QuadPart), &read,
+                      nullptr) != FALSE &&
+             read == static_cast<DWORD>(size.QuadPart);
+    }
+    CloseHandle(h);
+    if (!ok) return false;
     text = utf8ToWideString(bytes);
     return true;
 }
 
-bool sameFile(const std::filesystem::path& a, const std::filesystem::path& b) {
+bool sameFile(const std::wstring& a, const std::wstring& b) {
     return _wcsicmp(a.c_str(), b.c_str()) == 0;
 }
 
@@ -121,9 +132,9 @@ void startFolderSearchScan(App& app) {
             tabs.push_back(std::move(source));
         }
     }
-    std::filesystem::path current, folder;
+    std::wstring current, folder;
     if (!app.currentFile.empty()) current = toWide(app.currentFile);
-    if (app.folderSearchEnabled && !current.empty()) folder = current.parent_path();
+    if (app.folderSearchEnabled && !current.empty()) folder = pathParentDir(current);
     if (tabs.empty() && folder.empty()) return;
     int generation = ++app.folderSearchGeneration;
     app.folderSearchPending = true;
@@ -132,12 +143,12 @@ void startFolderSearchScan(App& app) {
 
     std::thread([generation, queryLower, tabs, folder, current, hwnd] {
         auto* msg = new FolderScanMsg{generation, {}};
-        auto add = [&](const std::filesystem::path& path, bool openTab,
+        auto add = [&](const std::wstring& path, bool openTab,
                        const std::wstring& content) {
             App::FolderFileResult result = scanText(content, queryLower);
             if (result.totalMatches == 0) return false;
-            result.fileName = path.filename().wstring();
-            result.fullPath = path.wstring();
+            result.fileName = pathFileName(path);
+            result.fullPath = path;
             result.openTab = openTab;
             msg->files.push_back(std::move(result));
             return true;
@@ -151,22 +162,24 @@ void startFolderSearchScan(App& app) {
         if (!folder.empty()) {
             // The folder's other Markdown files, by name; the open document
             // and files already listed as tabs are not repeated
-            std::vector<std::filesystem::path> siblings;
-            std::error_code ec;
-            for (const auto& entry : std::filesystem::directory_iterator(folder, ec)) {
+            std::vector<std::wstring> siblings;
+            std::vector<std::wstring> entries;
+            listDirectory(folder, entries);
+            for (const auto& entry : entries) {
                 if (siblings.size() >= 400) break;
-                if (!entry.is_regular_file(ec)) continue;
-                std::wstring ext = entry.path().extension().wstring();
+                if (!pathIsRegularFile(entry)) continue;
+                std::wstring ext = pathExtension(entry);
                 for (auto& c : ext) c = (wchar_t)std::towlower(c);
                 if (ext != L".md" && ext != L".markdown") continue;
-                if (!current.empty() && sameFile(entry.path(), current)) continue;
+                if (!current.empty() && sameFile(entry, current)) continue;
                 bool listed = false;
-                for (const auto& tab : tabs) listed = listed || sameFile(entry.path(), tab.path);
-                if (!listed) siblings.push_back(entry.path());
+                for (const auto& tab : tabs) listed = listed || sameFile(entry, tab.path);
+                if (!listed) siblings.push_back(entry);
             }
             std::sort(siblings.begin(), siblings.end(),
-                      [](const std::filesystem::path& a, const std::filesystem::path& b) {
-                          return _wcsicmp(a.filename().c_str(), b.filename().c_str()) < 0;
+                      [](const std::wstring& a, const std::wstring& b) {
+                          return _wcsicmp(pathFileName(a).c_str(),
+                                          pathFileName(b).c_str()) < 0;
                       });
             int found = 0;
             for (const auto& path : siblings) {

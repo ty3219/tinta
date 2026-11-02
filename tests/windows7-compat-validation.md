@@ -29,6 +29,41 @@ file allowed to name those APIs; `tests/win7_compat_tests.cpp` scans `src/`,
 `include/` and `tests/` on every `ctest` run and fails if a direct call
 returns.
 
+### Seventh API: `CreateFile2` (and `CopyFile2`) via `std::filesystem`
+
+The first port's source scan missed an import that is not in Tinta's source
+at all: the MSVC STL's `<filesystem>`. Since the STL's "Win8 baseline"
+(VS 2022 17.14, April 2025) `filesystem.cpp` calls `CreateFile2` and
+`CopyFile2` unconditionally, so any `std::filesystem` use in the statically
+linked exe puts those Windows 8+ names in its kernel32 import table and the
+loader refuses to start on Windows 7 with "procedure entry point CreateFile2
+could not be located in KERNEL32.dll".
+
+The fix removes `<filesystem>` from the exe entirely. `include/path_utils.h` /
+`src/path_utils.cpp` provide the handful of calls the code actually made,
+backed only by Windows 7 APIs (GetFileAttributesW, GetFileAttributesExW,
+FindFirstFileW, CreateDirectoryW, DeleteFileW, RemoveDirectoryW), plus
+`pathNormalize` (lexically_normal) and `pathParentDir` (parent_path)
+semantics for the path-joining call sites:
+
+- `src/search.cpp`: folder search scans `FindFirstFileW`, file size via
+  `GetFileSizeEx`, reads via `CreateFileW`/`ReadFile`.
+- `src/input.cpp`: wiki-link directory scan, file-name extraction, create-ref
+  parent directories (`CreateDirectoryW`), link-peek resolution.
+- `src/inline_style.cpp`: relative image/file reference resolution and
+  `lexically_normal` normalization.
+- `src/editor.cpp`: Save-As name/parent and clipboard-image candidate paths.
+- `src/render.cpp`: local image `parent_path` + join.
+- `src/export_html.cpp`, `src/plantuml.cpp`, `src/plantuml_queue.cpp`:
+  recursive temp work-dir create/delete and artifact scans.
+
+`tests/win7_compat_tests.cpp` now also fails if `<filesystem>` /
+`std::filesystem` appears in `src/` or `include/` (tests keep it: they run on
+Windows 10/11 CI), and the CI workflow runs `tests/check_win7_imports.ps1`,
+which dumps the built exe's import table with `dumpbin` and fails on any
+Windows 8/10-only import. That check catches static-library imports, not just
+direct source calls.
+
 ## What was checked (static, this workspace)
 
 The workspace is Linux, so no Windows 7 runtime was available. Static checks
@@ -36,6 +71,14 @@ performed here:
 
 - Source audit: no remaining direct calls of the six APIs outside the shim
   (`grep` over `src/`, `include/`, `tests/`).
+- No `std::filesystem` / `<filesystem>` remains in `src/` or `include/`; the
+  extended `win7_compat_tests` scan fails otherwise.
+- `win7_compat` CTest test: the extended scan (six APIs + `CreateFile2` /
+  `CopyFile2` + the `src/`/`include/` filesystem ban) builds and passes on
+  Linux; the same target runs in the Windows CI `ctest`.
+- Path helper semantics were checked against `std::filesystem` behavior
+  (parent_path, stem, extension, lexically_normal) with a standalone harness
+  before wiring the Win32 implementations.
 - Broader audit: no other Windows 8/10-only API calls in the source
   (`GetDpiForMonitor`, `GetSystemTimePreciseAsFileTime`, `SetWindowCompositionAttribute`,
   DPI-context family, appmodel family, `PathCch*`).
@@ -58,10 +101,15 @@ performed here:
 3. **Core viewer**: headings, tables, lists, emphasis, links, quotes, code,
    math and the Mermaid flowchart in the fixture render in Paper and Midnight
    themes, at normal and narrow widths.
-4. **Platform Update split** (optional): on plain SP1, color emoji and SVG
+4. **Path handling** (the `CreateFile2` fix): open the updated
+   `tests/fixtures/windows7-compat.md` and check the "Path handling" section —
+   the relative image, `[[windows7-compat]]` wiki link, file reference and
+   `..\` reference resolve as on Windows 10; the PlantUML fence renders when a
+   tool is installed and its per-render work directory is removed afterwards.
+5. **Platform Update split** (optional): on plain SP1, color emoji and SVG
    images degrade (alt text), and Print/PDF export shows no dialog or a
    graceful failure; with KB2670838 installed, Direct2D 1.1 features return.
-5. **Touch** is unavailable on Windows 7 by design (`WM_POINTER*`); mouse and
+6. **Touch** is unavailable on Windows 7 by design (`WM_POINTER*`); mouse and
    keyboard must work.
 
 ## Remaining limitations

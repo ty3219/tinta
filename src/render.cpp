@@ -1,6 +1,7 @@
 #include "frontmatter_ui.h"
 #include "render.h"
 #include "file_utils.h"
+#include "path_utils.h"
 #include "inline_style.h"
 #include "utils.h"
 #include "syntax.h"
@@ -25,7 +26,6 @@
 #include <memory>
 #include <exception>
 #include <string_view>
-#include <filesystem>
 #include <fstream>
 #include <urlmon.h>
 #include <thread>
@@ -3185,20 +3185,20 @@ static App::ImageEntry& getOrLoadImage(App& app, const std::string& src, bool fr
     std::wstring folder;
     if (!isUrl) {
         // Resolve relative to the current file's directory. Both strings are
-        // UTF-8 and must be widened explicitly: a narrow filesystem::path
-        // decodes through the ANSI codepage and mangles non-ASCII paths (#87)
+        // UTF-8 and must be widened explicitly: a narrow path decodes
+        // through the ANSI codepage and mangles non-ASCII paths (#87)
         // Decode URL escapes once before converting UTF-8 to a native path
         // (#293). Remote URLs keep their original encoding.
         std::wstring wsrc = toWide(qmd::decodeLinkComponent(src));
         if (!app.currentFile.empty()) {
-            folder = std::filesystem::path(toWide(app.currentFile)).parent_path().wstring();
+            folder = pathParentDir(toWide(app.currentFile));
         } else {
             // An untitled note has no folder of its own: relative images
             // resolve against the launch folder, as they did while the
             // process still worked there (#253)
             folder = launchDirectory();
         }
-        widePath = (std::filesystem::path(folder) / wsrc).wstring();
+        widePath = pathJoin(folder, wsrc);
     }
 
     // A document opens images on this computer and on the server it came

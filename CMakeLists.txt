@@ -52,6 +52,7 @@ set(SOURCES
     src/render.cpp
     src/image_loader.cpp
     src/file_utils.cpp
+    src/path_utils.cpp
     src/overlays.cpp
     src/frontmatter_ui.cpp
     src/sidepanels.cpp
@@ -108,6 +109,7 @@ set(HEADERS
     include/render.h
     include/image_loader.h
     include/file_utils.h
+    include/path_utils.h
     include/overlays.h
     include/input.h
     include/touch.h
@@ -426,7 +428,7 @@ if(BUILD_TESTING)
 
     add_executable(context_menu_tests tests/context_menu_tests.cpp src/context_menu.cpp
         src/markdown.cpp src/footnotes.cpp src/themes.cpp src/config_dir.cpp
-        src/plantuml.cpp src/plantuml_queue.cpp)
+        src/plantuml.cpp src/path_utils.cpp src/plantuml_queue.cpp)
     target_include_directories(context_menu_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(context_menu_tests PRIVATE md4c shell32)
     target_compile_definitions(context_menu_tests PRIVATE UNICODE _UNICODE)
@@ -438,7 +440,7 @@ if(BUILD_TESTING)
 
     add_executable(math_layout_tests tests/math_layout_tests.cpp
         src/math_parser.cpp src/math_macros.cpp src/math_render.cpp src/markdown.cpp src/footnotes.cpp src/themes.cpp src/config_dir.cpp
-        src/plantuml.cpp src/plantuml_queue.cpp)
+        src/plantuml.cpp src/path_utils.cpp src/plantuml_queue.cpp)
     target_include_directories(math_layout_tests PRIVATE include src ${md4c_SOURCE_DIR}/src)
     target_link_libraries(math_layout_tests PRIVATE md4c d2d1 dwrite windowscodecs shell32 ole32)
     target_compile_definitions(math_layout_tests PRIVATE UNICODE _UNICODE
@@ -480,7 +482,7 @@ if(BUILD_TESTING)
     # through a portable driver: the suite exercises saveSettings/loadSettings
     # on a temp settings.ini and must never touch %APPDATA%\Tinta.
     add_executable(plantuml_tests tests/plantuml_tests.cpp src/plantuml.cpp
-        src/settings.cpp src/i18n.cpp src/config_dir.cpp
+        src/path_utils.cpp src/settings.cpp src/i18n.cpp src/config_dir.cpp
         src/frontmatter.cpp src/keymap.cpp
         src/plantuml_queue.cpp)
     target_include_directories(plantuml_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -550,7 +552,7 @@ if(BUILD_TESTING)
         src/markdown.cpp src/footnotes.cpp
         src/themes.cpp
         src/config_dir.cpp
-        src/plantuml.cpp src/plantuml_queue.cpp
+        src/plantuml.cpp src/path_utils.cpp src/plantuml_queue.cpp
     )
     target_include_directories(inline_style_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include

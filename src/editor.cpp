@@ -16,10 +16,10 @@
 #include "i18n.h"
 #include "input.h"
 #include "sidepanels.h"
+#include "path_utils.h"
 
 #include "export.h"
 
-#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -1902,10 +1902,10 @@ void renderEditorReadingButton(App& app) {
 // and the note becomes a normal file-backed session.
 static bool promptSaveAsPath(App& app, HWND hwnd) {
     wchar_t path[MAX_PATH] = L"";
-    const std::filesystem::path previous(toWide(app.currentFile));
-    const std::wstring name = previous.filename().wstring();
+    const std::wstring previous = toWide(app.currentFile);
+    const std::wstring name = pathFileName(previous);
     if (!name.empty()) wcsncpy_s(path, name.c_str(), _TRUNCATE);
-    const std::wstring directory = previous.parent_path().wstring();
+    const std::wstring directory = pathParentDir(previous);
     const DWORD attributes = directory.empty() ? INVALID_FILE_ATTRIBUTES
         : GetFileAttributesW(directory.c_str());
     OPENFILENAMEW ofn = {};
@@ -2801,19 +2801,18 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 // the document and pastes as its markdown link
                 if (paste.empty() && !app.currentFile.empty() &&
                     IsClipboardFormatAvailable(CF_BITMAP)) {
-                    namespace fs = std::filesystem;
-                    fs::path doc(toWide(app.currentFile));
-                    std::wstring stem = doc.stem().wstring();
+                    const std::wstring doc = toWide(app.currentFile);
+                    std::wstring stem = pathStem(doc);
                     std::wstring name;
-                    fs::path target;
+                    std::wstring target;
+                    const std::wstring parent = pathParentDir(doc);
                     for (int i = 1; i < 100; i++) {
                         wchar_t suffix[24];
                         swprintf_s(suffix, _countof(suffix),
                                    L"-img-%02d.png", i);
                         std::wstring candidate = stem + suffix;
-                        fs::path p = doc.parent_path() / candidate;
-                        std::error_code ec;
-                        if (!fs::exists(p, ec)) {
+                        std::wstring p = pathJoin(parent, candidate);
+                        if (!pathExists(p)) {
                             name = candidate;
                             target = p;
                             break;
@@ -2821,7 +2820,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     }
                     if (!name.empty() &&
                         clipboardImageToPngFile(app, hwnd,
-                                                target.wstring())) {
+                                                target)) {
                         std::wstring linkName = name;
                         size_t sp = 0;  // spaces break the link target
                         while ((sp = linkName.find(L' ', sp)) !=

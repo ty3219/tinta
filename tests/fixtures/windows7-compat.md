@@ -63,4 +63,32 @@ int main() {
 }
 ```
 
+## Path handling
+
+Relative images, wiki links, file references and the PlantUML work directory
+all run through Win32 file APIs (GetFileAttributesW, FindFirstFileW,
+CreateDirectoryW, ...) on every Windows version. These paths resolved with
+the standard library before, which since the MSVC "Win8 baseline" statically
+imports CreateFile2/CopyFile2 and stops the exe from loading on Windows 7.
+
+| Check | Expectation |
+| :--- | :--- |
+| Relative image | `images/windows7.png` resolves beside this document |
+| Wiki link | `[[windows7-compat]]` resolves to this note by name scan |
+| File reference | `windows7-compat.md` opens in a tab |
+| PlantUML | A diagram renders from the per-render work directory, which is then deleted |
+
+![Relative image](images/windows7.png)
+
+- The wiki link below opens the note named `windows7-compat` even though the
+  link omits the extension: [[windows7-compat]]
+- The file reference opens the same note as a tab: [this document](windows7-compat.md)
+- A nested `..\` reference normalizes to this folder: [parent image](../windows7-compat.md)
+
+```plantuml
+@startuml
+Alice -> Bob: rendered through the Win32 work-directory helpers
+@enduml
+```
+
 Final paragraph: all surrounding content stays visible, including this line.

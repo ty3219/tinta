@@ -4,15 +4,14 @@
 // theme or App types, and no remote access of any kind.
 
 #include "plantuml.h"
+#include "path_utils.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cwctype>
-#include <filesystem>
 #include <fstream>
 #include <string>
-#include <system_error>
 #include <vector>
 
 #include <windows.h>
@@ -116,42 +115,32 @@ bool lineStartsWith(const std::string& source, size_t begin, size_t end, const c
 // remaining `*.<ext>` file (lexicographically first when there are
 // several). Every candidate must be a non-empty regular file. Returns an
 // empty path when nothing usable exists.
-std::filesystem::path resolveArtifact(const std::filesystem::path& workDir,
-                                      int format, std::error_code& ec) {
+std::wstring resolveArtifact(const std::wstring& workDir, int format) {
     const std::wstring suffix = format == 1 ? L".svg" : L".png";
-    auto usable = [](const std::filesystem::path& candidate) {
-        std::error_code localEc;
-        if (!std::filesystem::is_regular_file(candidate, localEc) || localEc) {
-            return false;
-        }
-        const uintmax_t bytes = std::filesystem::file_size(candidate, localEc);
-        return !localEc && bytes > 0;
+    auto usable = [](const std::wstring& candidate) {
+        return pathIsRegularFile(candidate) && pathFileSize(candidate) > 0;
     };
 
-    const std::filesystem::path canonical = workDir / (L"input" + suffix);
+    const std::wstring canonical = pathJoin(workDir, L"input" + suffix);
     if (usable(canonical)) return canonical;
 
-    std::vector<std::filesystem::path> candidates;
-    std::filesystem::directory_iterator it(workDir, ec);
-    const std::filesystem::directory_iterator end;
-    while (!ec && it != end) {
-        const std::filesystem::directory_entry entry = *it;
-        it.increment(ec);
-        std::error_code typeEc;
-        if (!entry.is_regular_file(typeEc) || typeEc) continue;
-        std::wstring extension = entry.path().extension().wstring();
+    std::vector<std::wstring> candidates;
+    std::vector<std::wstring> entries;
+    listDirectory(workDir, entries);
+    for (const auto& entry : entries) {
+        if (!pathIsRegularFile(entry)) continue;
+        std::wstring extension = pathExtension(entry);
         for (wchar_t& c : extension) {
             c = static_cast<wchar_t>(std::towlower(c));
         }
         if (extension != suffix) continue;
-        if (!usable(entry.path())) continue;
-        candidates.push_back(entry.path());
+        if (!usable(entry)) continue;
+        candidates.push_back(entry);
     }
-    if (candidates.empty()) return std::filesystem::path();
+    if (candidates.empty()) return L"";
     std::sort(candidates.begin(), candidates.end(),
-              [](const std::filesystem::path& left,
-                 const std::filesystem::path& right) {
-                  return left.wstring() < right.wstring();
+              [](const std::wstring& left, const std::wstring& right) {
+                  return left < right;
               });
     return candidates.front();
 }
@@ -159,20 +148,15 @@ std::filesystem::path resolveArtifact(const std::filesystem::path& workDir,
 // Removes every image artifact and any staged source from the private
 // workDir, so a failed render can never be mistaken for a success and no
 // temp source survives a failure.
-void scrubWorkDir(const std::filesystem::path& workDir) {
-    std::error_code ec;
-    std::filesystem::directory_iterator it(workDir, ec);
-    const std::filesystem::directory_iterator end;
-    while (!ec && it != end) {
-        const std::filesystem::directory_entry entry = *it;
-        it.increment(ec);
-        std::error_code typeEc;
-        if (!entry.is_regular_file(typeEc)) continue;
-        std::wstring ext = entry.path().extension().wstring();
+void scrubWorkDir(const std::wstring& workDir) {
+    std::vector<std::wstring> entries;
+    listDirectory(workDir, entries);
+    for (const auto& entry : entries) {
+        if (!pathIsRegularFile(entry)) continue;
+        std::wstring ext = pathExtension(entry);
         for (wchar_t& c : ext) c = static_cast<wchar_t>(std::towlower(c));
         if (ext == L".png" || ext == L".svg" || ext == L".puml") {
-            std::error_code removeEc;
-            std::filesystem::remove(entry.path(), removeEc);
+            removeAll(entry);
         }
     }
 }
@@ -463,18 +447,15 @@ bool renderSync(const Tool& tool, const std::string& sourceWithPreamble,
         return false;
     }
 
-    std::error_code ec;
-    const std::filesystem::path dir(workDir);
-    std::filesystem::create_directories(dir, ec);
-    if (ec || !std::filesystem::is_directory(dir, ec) || ec) {
+    if (!createDirectories(workDir) || !pathIsDirectory(workDir)) {
         error = L"Cannot prepare the PlantUML work directory";
         return false;
     }
 
-    const std::filesystem::path inputPath = dir / L"input.puml";
+    const std::wstring inputPath = pathJoin(workDir, L"input.puml");
     const std::string input = toolInput(sourceWithPreamble);
     {
-        std::ofstream out(inputPath, std::ios::binary | std::ios::trunc);
+        std::ofstream out(inputPath.c_str(), std::ios::binary | std::ios::trunc);
         if (!out) {
             error = L"Cannot write the PlantUML input file";
             return false;
@@ -488,7 +469,7 @@ bool renderSync(const Tool& tool, const std::string& sourceWithPreamble,
     }
 
     std::wstring command =
-        buildCommandLine(tool, fmt, workDir, inputPath.wstring());
+        buildCommandLine(tool, fmt, workDir, inputPath);
     std::vector<wchar_t> mutableCommand(command.begin(), command.end());
     mutableCommand.push_back(L'\0');
 
@@ -522,7 +503,7 @@ bool renderSync(const Tool& tool, const std::string& sourceWithPreamble,
                         environment.data(), workDir.c_str(), &si, &pi)) {
         const DWORD lastError = GetLastError();
         if (job != nullptr) CloseHandle(job);
-        scrubWorkDir(dir);
+        scrubWorkDir(workDir);
         error = L"Cannot start the PlantUML tool (error " +
                 std::to_wstring(lastError) + L")";
         return false;
@@ -553,31 +534,31 @@ bool renderSync(const Tool& tool, const std::string& sourceWithPreamble,
     if (job != nullptr) CloseHandle(job);  // ends whatever the tool left running
 
     if (cancelled) {
-        scrubWorkDir(dir);
+        scrubWorkDir(workDir);
         error = L"PlantUML render cancelled";
         return false;
     }
     if (timedOut) {
-        scrubWorkDir(dir);
+        scrubWorkDir(workDir);
         error = L"PlantUML timed out after " + std::to_wstring(timeoutMs) + L" ms";
         return false;
     }
     if (exitCode != 0) {
         if (exitCodeOut != nullptr) *exitCodeOut = static_cast<int>(exitCode);
-        scrubWorkDir(dir);
+        scrubWorkDir(workDir);
         error = L"PlantUML exited with code " + std::to_wstring(exitCode);
         return false;
     }
 
-    const std::filesystem::path artifact = resolveArtifact(dir, fmt, ec);
+    const std::wstring artifact = resolveArtifact(workDir, fmt);
     if (artifact.empty()) {
         if (exitCodeOut != nullptr) *exitCodeOut = static_cast<int>(exitCode);
-        scrubWorkDir(dir);
+        scrubWorkDir(workDir);
         error = L"PlantUML produced no usable image";
         return false;
     }
     if (exitCodeOut != nullptr) *exitCodeOut = 0;
-    outFile = artifact.wstring();
+    outFile = artifact;
     return true;
 }
 

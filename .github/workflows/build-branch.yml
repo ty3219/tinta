@@ -31,6 +31,15 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
+      # The exe's import table must not name any Windows 8/10-only API or
+      # the loader refuses to start it on Windows 7. The source scan in
+      # win7_compat_tests catches Tinta's own calls; this catches imports
+      # smuggled in by a static library (the MSVC STL's <filesystem> since
+      # its April 2025 Win8 baseline, for example).
+      - name: Verify Win7 import table
+        shell: pwsh
+        run: ./tests/check_win7_imports.ps1 -ExePath build/Release/tinta.exe
+
       # Runs the full ctest suite, including win7_compat_tests which scans
       # the sources for direct calls of Windows 8/10-only APIs.
       - name: Test

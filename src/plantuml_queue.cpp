@@ -3,11 +3,10 @@
 // is owner-thread-only, and the worker never mutates the cache.
 
 #include "plantuml_queue.h"
+#include "path_utils.h"
 
 #include <algorithm>
 #include <chrono>
-#include <filesystem>
-#include <system_error>
 #include <utility>
 
 #include <windows.h>
@@ -19,8 +18,7 @@ namespace {
 // a sweep or a shutdown.
 void removeDirTree(const std::wstring& dir) {
     if (dir.empty()) return;
-    std::error_code ec;
-    std::filesystem::remove_all(std::filesystem::path(dir), ec);
+    removeAll(dir);
 }
 
 // A root belongs to a running Tinta while its process lives; one that
@@ -41,6 +39,24 @@ bool isAllDigits(const std::wstring& text) {
         if (c < L'0' || c > L'9') return false;
     }
     return true;
+}
+
+// Directory last-write time in FILETIME 100ns units since 1601, 0 when the
+// directory cannot be queried (the last-write time the sweep used to read
+// through the standard library, now read with GetFileAttributesExW).
+static uint64_t lastWriteTime(const std::wstring& path) {
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) {
+        return 0;
+    }
+    return (static_cast<uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) |
+           data.ftLastWriteTime.dwLowDateTime;
+}
+
+static uint64_t nowFileTime() {
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    return (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
 }
 
 // Block bookkeeping for a job shared by several layout blocks (key-level
@@ -76,21 +92,17 @@ void sweepStaleTempRoots() {
     const DWORD length = GetTempPathW(MAX_PATH, base);
     if (length == 0 || length >= MAX_PATH) return;
 
-    const std::filesystem::path tempRoot(base);
+    const std::wstring tempRoot(base);
     const std::wstring prefix = L"tinta-plantuml-";
-    const auto cutoff =
-        std::filesystem::file_time_type::clock::now() - std::chrono::hours(24);
+    // 24 hours in FILETIME 100ns units.
+    const uint64_t cutoff = nowFileTime() - 24ULL * 60 * 60 * 10000000;
     const unsigned long livePid =
         static_cast<unsigned long>(GetCurrentProcessId());
 
-    std::error_code ec;
-    std::filesystem::directory_iterator it(tempRoot, ec);
-    const std::filesystem::directory_iterator end;
-    while (!ec && it != end) {
-        const std::filesystem::directory_entry entry = *it;
-        it.increment(ec);
-
-        const std::wstring name = entry.path().filename().wstring();
+    std::vector<std::wstring> entries;
+    listDirectory(tempRoot, entries);
+    for (const std::wstring& entry : entries) {
+        const std::wstring name = pathFileName(entry);
         if (name.size() <= prefix.size() ||
             name.compare(0, prefix.size(), prefix) != 0) {
             continue;
@@ -109,15 +121,12 @@ void sweepStaleTempRoots() {
         // still open keeps its root
         if (processAlive(static_cast<unsigned long>(pid))) continue;
 
-        std::error_code typeEc;
-        if (!entry.is_directory(typeEc) || typeEc) continue;
+        if (!pathIsDirectory(entry)) continue;
 
-        std::error_code timeEc;
-        const std::filesystem::file_time_type written =
-            entry.last_write_time(timeEc);
-        if (timeEc || written >= cutoff) continue;
+        const uint64_t written = lastWriteTime(entry);
+        if (written == 0 || written >= cutoff) continue;
 
-        removeDirTree(entry.path().wstring());
+        removeDirTree(entry);
     }
 }
 
@@ -268,10 +277,7 @@ size_t PlantumlRenderQueue::drainFinished() {
             if (it == cache_.end()) continue;
             // The image lives in <workRoot>\\<hex>\\input.png|svg, so its
             // parent directory is the whole unadopted work directory.
-            const std::wstring dir =
-                std::filesystem::path(it->second->filePath)
-                    .parent_path()
-                    .wstring();
+            const std::wstring dir = pathParentDir(it->second->filePath);
             removeDirTree(dir);
             cache_.erase(it);
         }

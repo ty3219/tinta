@@ -11,6 +11,7 @@
 #include "document.h"
 #include "editor.h"
 #include "file_utils.h"
+#include "path_utils.h"
 #include "utils.h"
 #include "search.h"
 #include "search_panel.h"
@@ -32,7 +33,6 @@
 #include <shellapi.h>
 #include <commdlg.h>
 #include <cwctype>
-#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -2390,33 +2390,33 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
 // appended, then a case-insensitive scan of the directory listing.
 static bool openWikiLink(App& app, const std::string& target) {
     if (app.editMode || app.currentFile.empty()) return false;
-    namespace fs = std::filesystem;
-    std::error_code ec;
     std::wstring wideTarget = toWide(target);
-    fs::path dir = fs::path(toWide(app.currentFile)).parent_path();
+    const std::wstring dir = pathParentDir(toWide(app.currentFile));
 
     // A wiki link names a note; one that reaches another computer's share
     // is not looked up (network_path.h)
-    auto tryOpen = [&](const fs::path& p) {
-        return qmd::mayOpenFromDocument(p.wstring(), dir.wstring()) &&
-               fs::exists(p, ec) && !fs::is_directory(p, ec) &&
-               openDocumentInViewer(app, p.wstring());
+    auto tryOpen = [&](const std::wstring& p) {
+        return qmd::mayOpenFromDocument(p, dir) &&
+               pathExists(p) && !pathIsDirectory(p) &&
+               openDocumentInViewer(app, p);
     };
-    if (tryOpen(dir / wideTarget)) return true;
-    if (tryOpen(dir / (wideTarget + L".md"))) return true;
-    if (tryOpen(dir / (wideTarget + L".markdown"))) return true;
+    if (tryOpen(pathJoin(dir, wideTarget))) return true;
+    if (tryOpen(pathJoin(dir, wideTarget + L".md"))) return true;
+    if (tryOpen(pathJoin(dir, wideTarget + L".markdown"))) return true;
 
     auto lower = [](std::wstring s) {
         for (auto& c : s) c = (wchar_t)std::towlower(c);
         return s;
     };
     std::wstring want = lower(wideTarget);
-    for (const auto& entry : fs::directory_iterator(dir, ec)) {
-        if (!entry.is_regular_file(ec)) continue;
-        std::wstring stem = lower(entry.path().stem().wstring());
-        std::wstring name = lower(entry.path().filename().wstring());
+    std::vector<std::wstring> entries;
+    listDirectory(dir, entries);
+    for (const auto& entry : entries) {
+        if (!pathIsRegularFile(entry)) continue;
+        std::wstring stem = lower(pathStem(entry));
+        std::wstring name = lower(pathFileName(entry));
         if (stem == want || name == want) {
-            if (openDocumentInViewer(app, entry.path().wstring())) return true;
+            if (openDocumentInViewer(app, entry)) return true;
         }
     }
     // Target doesn't exist: leave the document as-is (a viewer doesn't
@@ -2441,7 +2441,7 @@ static void offerCreateFileRef(App& app, const std::string& url) {
     if (qmd::fileRefIsExternal(path)) {
         auto wide = toWide(path);
         signalPushKey(app, SIG_WARN, SIGI_FILE, "toast.file_missing",
-                      std::filesystem::path(wide).filename().wstring(), wide);
+                      pathFileName(wide), wide);
         return;
     }
     app.createRefPath = std::move(path);
@@ -2469,7 +2469,7 @@ static bool openFileRefTarget(App& app, HWND hwnd, const std::string& url) {
                 ? "toast.file_missing" : error == ERROR_NO_ASSOCIATION
                 ? "toast.file_no_app" : "toast.file_open_failed";
             signalPushKey(app, SIG_ERROR, SIGI_FILE, message,
-                          std::filesystem::path(wide).filename().wstring(), wide);
+                          pathFileName(wide), wide);
         }
         return false;
     }
@@ -2568,12 +2568,12 @@ static void startPageInvoke(App& app, HWND hwnd, int id) {
 static void createRefAction(App& app, HWND hwnd, int action) {
     app.createRefPending = false;
     if (action == 1 && !app.createRefPath.empty()) {
-        std::filesystem::path target(toWide(app.createRefPath));
-        std::error_code ec;
-        if (target.has_parent_path()) {
-            std::filesystem::create_directories(target.parent_path(), ec);
+        const std::wstring target = toWide(app.createRefPath);
+        const std::wstring parent = pathParentDir(target);
+        if (!parent.empty()) {
+            createDirectories(parent);
         }
-        std::ofstream out(target, std::ios::binary);
+        std::ofstream out(target.c_str(), std::ios::binary);
         if (out) {
             out.close();
             // The layout cached this path as missing; the ghost turns live
@@ -4463,9 +4463,7 @@ void handleDropFiles(App& app, HWND hwnd, WPARAM wParam) {
 void handleLinkPeekTimer(App& app, HWND hwnd) {
     KillTimer(hwnd, TIMER_LINK_PEEK);
     if (app.linkPeekUrl.empty() || app.hoveredLink != app.linkPeekUrl) return;
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    fs::path target;
+    std::wstring target;
     if (app.linkPeekUrl.rfind("fileref-ok:", 0) == 0) {
         const auto path = qmd::splitLinkTarget(app.linkPeekUrl.substr(11)).path;
         if (qmd::fileRefIsExternal(path)) return;  // nothing to render for .pdf
@@ -4473,20 +4471,20 @@ void handleLinkPeekTimer(App& app, HWND hwnd) {
     } else if (app.linkPeekUrl.rfind("wiki:", 0) == 0 &&
                !app.currentFile.empty()) {
         std::wstring t = toWide(app.linkPeekUrl.substr(5));
-        fs::path dir = fs::path(toWide(app.currentFile)).parent_path();
+        const std::wstring dir = pathParentDir(toWide(app.currentFile));
         // Hovering never reaches another computer's share (network_path.h)
-        auto found = [&](const fs::path& p) {
-            return qmd::mayOpenFromDocument(p.wstring(), dir.wstring()) && fs::exists(p, ec);
+        auto found = [&](const std::wstring& p) {
+            return qmd::mayOpenFromDocument(p, dir) && pathExists(p);
         };
-        if (found(dir / t)) {
-            target = dir / t;
-        } else if (found(dir / (t + L".md"))) {
-            target = dir / (t + L".md");
-        } else if (found(dir / (t + L".markdown"))) {
-            target = dir / (t + L".markdown");
+        if (found(pathJoin(dir, t))) {
+            target = pathJoin(dir, t);
+        } else if (found(pathJoin(dir, t + L".md"))) {
+            target = pathJoin(dir, t + L".md");
+        } else if (found(pathJoin(dir, t + L".markdown"))) {
+            target = pathJoin(dir, t + L".markdown");
         }
     }
-    if (target.empty() || !fs::exists(target, ec)) return;
+    if (target.empty() || !pathExists(target)) return;
 
     // Place the panel to the right of the link, never past the right
     // edge; when the link leaves no room there, right-align it instead
@@ -4516,13 +4514,13 @@ void handleLinkPeekTimer(App& app, HWND hwnd) {
     float titleH = dpi(app, 22.0f);
     float contentH = h - titleH - 2.0f;
     ID2D1Bitmap* bitmap =
-        renderPeekBitmap(app, target.wstring(), w - 2.0f, contentH);
+        renderPeekBitmap(app, target, w - 2.0f, contentH);
     if (!bitmap) return;
     // The render may have shrunk to the target's real height
     app.linkPeekPanel.bottom = py + titleH + contentH + 2.0f;
     if (app.linkPeekBitmap) app.linkPeekBitmap->Release();
     app.linkPeekBitmap = bitmap;
-    app.linkPeekTitle = target.filename().wstring();
+    app.linkPeekTitle = pathFileName(target);
     app.linkPeekActive = true;
     InvalidateRect(hwnd, nullptr, FALSE);
 }

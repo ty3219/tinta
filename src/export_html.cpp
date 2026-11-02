@@ -8,6 +8,7 @@
 
 #include "editor.h"
 #include "file_utils.h"
+#include "path_utils.h"
 #include "i18n.h"
 #include "link_target.h"
 #include "network_path.h"
@@ -25,7 +26,6 @@
 #include <cctype>
 #include <chrono>
 #include <cstdio>
-#include <filesystem>
 
 #include <functional>
 #include <commdlg.h>
@@ -1167,8 +1167,7 @@ std::string plantumlFenceSvg(ExportCtx& ctx, const std::string& code) {
 
     // The export leaves nothing behind: delete the per-fence work dir
     // whether the render succeeded, failed or timed out.
-    std::error_code ec;
-    std::filesystem::remove_all(std::filesystem::path(workDir), ec);
+    removeAll(workDir);
     return svg;
 }
 

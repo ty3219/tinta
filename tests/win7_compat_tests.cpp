@@ -23,11 +23,26 @@ const char* kForbidden[] = {
     "GetCurrentPackageFullName",  // Windows 8+
     "GetPointerType",             // Windows 8+
     "GetPointerInfo",             // Windows 8+
+    "CreateFile2",                // Windows 8+ (MSVC <filesystem> imports it)
+    "CopyFile2",                  // Windows 8+ (MSVC <filesystem> imports it)
+    "GetSystemTimePreciseAsFileTime",  // Windows 8+ (MSVC <chrono> system_clock)
+};
+
+// <filesystem> in the production tree. Since the MSVC STL's Win8 baseline
+// (VS 2022 17.14, April 2025), std::filesystem statically imports
+// CreateFile2/CopyFile2 from kernel32.dll, so any use in the exe makes the
+// loader refuse to start on Windows 7. The tests keep std::filesystem (they
+// run on Windows 10/11 CI), so this ban covers src/ and include/ only.
+const char* kForbiddenFilesystem[] = {
+    "<filesystem>",
+    "<experimental/filesystem>",
+    "std::filesystem",
 };
 
 const char* kAllowedFiles[] = {
     "win7_compat.h",   // the shim header (GetProcAddress string literals)
     "win7_compat_tests.cpp",  // this file (the list above)
+    "path_utils.h",    // documents why <filesystem> is banned
 };
 
 // The token counts only when it is a whole identifier, so a hypothetical
@@ -42,7 +57,8 @@ bool wholeIdentifier(const std::string& line, size_t pos, size_t len) {
     return true;
 }
 
-int scanFile(const std::filesystem::path& path, int& failures) {
+int scanFile(const std::filesystem::path& path, int& failures,
+             bool scanFilesystem) {
     std::ifstream in(path);
     if (!in) {
         std::cerr << "FAIL: cannot read " << path << "\n";
@@ -66,6 +82,19 @@ int scanFile(const std::filesystem::path& path, int& failures) {
                 pos += token.size();
             }
         }
+        if (scanFilesystem) {
+            for (const char* api : kForbiddenFilesystem) {
+                std::string token(api);
+                size_t pos = 0;
+                while ((pos = line.find(token, pos)) != std::string::npos) {
+                    std::cerr << "FAIL: " << path << ":" << lineNo
+                              << " uses " << token
+                              << "; route through path_utils.h instead\n";
+                    ++failures;
+                    pos += token.size();
+                }
+            }
+        }
     }
     return 0;
 }
@@ -83,6 +112,9 @@ int main() {
         std::filesystem::path dir = root / dirName;
         std::error_code ec;
         if (!std::filesystem::exists(dir, ec)) continue;
+        // std::filesystem is fine in tests (they run on Windows 10/11 CI);
+        // the exe's own source may not use it (see kForbiddenFilesystem).
+        const bool production = std::string(dirName) != "tests";
         for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
             if (!entry.is_regular_file()) continue;
             std::string name = entry.path().filename().string();
@@ -92,7 +124,7 @@ int main() {
             for (const char* allowedFile : kAllowedFiles) {
                 if (name == allowedFile) { allowed = true; break; }
             }
-            if (!allowed) scanFile(entry.path(), failures);
+            if (!allowed) scanFile(entry.path(), failures, production);
         }
     }
     if (failures > 0) {
@@ -100,7 +132,7 @@ int main() {
                   << " direct call(s) of Windows 8/10-only APIs\n";
         return 1;
     }
-    std::cout << "win7_compat: no Windows 8/10-only API calls outside "
-                 "win7_compat.h\n";
+    std::cout << "win7_compat: no Windows 8/10-only API calls and no "
+                 "std::filesystem outside win7_compat.h / path_utils.h\n";
     return 0;
 }

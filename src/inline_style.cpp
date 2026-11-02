@@ -1,9 +1,9 @@
 #include "inline_style.h"
 #include "link_target.h"
 #include "network_path.h"
+#include "path_utils.h"
 
 #include <cctype>
-#include <filesystem>
 
 namespace {
 
@@ -50,24 +50,24 @@ bool isLocalFileRefUrl(const std::string& url) {
 // computer's share is not checked, which would sign in to its server
 // (network_path.h): it badges as missing.
 bool resolveFileRef(App& app, const std::string& raw, std::string& absOut) {
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    fs::path path(refToWide(raw));
-    fs::path folder;
-    if (!app.currentFile.empty()) folder = fs::path(refToWide(app.currentFile)).parent_path();
-    if (path.is_relative()) {
+    std::wstring path = refToWide(raw);
+    std::wstring folder;
+    if (!app.currentFile.empty()) {
+        folder = pathParentDir(refToWide(app.currentFile));
+    }
+    if (pathIsRelative(path)) {
         if (folder.empty()) {
             absOut = raw;
             return false;  // unsaved buffer: nothing to resolve against
         }
-        path = folder / path;
+        path = pathJoin(folder, path);
     }
-    path = path.lexically_normal();
-    absOut = refToUtf8(path.wstring());
+    path = pathNormalize(path);
+    absOut = refToUtf8(path);
     auto found = app.fileRefCache.find(absOut);
     if (found != app.fileRefCache.end()) return found->second;
-    bool exists = qmd::mayOpenFromDocument(path.wstring(), folder.wstring()) &&
-                  fs::exists(path, ec) && !fs::is_directory(path, ec);
+    bool exists = qmd::mayOpenFromDocument(path, folder) &&
+                  pathExists(path) && !pathIsDirectory(path);
     app.fileRefCache[absOut] = exists;
     return exists;
 }
