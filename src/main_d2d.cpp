@@ -4,6 +4,7 @@
 
 #include "app.h"
 #include "win7_compat.h"
+#include "log.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -52,6 +53,10 @@
 #pragma comment(lib, "dbghelp.lib")
 
 static App* g_app = nullptr;
+// Paint counter for the throttled WM_PAINT log: a handful of leading frames
+// plus every 100th are enough to see whether the window keeps repainting
+// after a document opens or a click lands, without flooding the log.
+static unsigned g_paintCount = 0;
 
 // Initializes the GPU driver on a worker thread after the first (software)
 // frame is on screen. D3D device creation costs ~200 ms dominated by
@@ -65,11 +70,16 @@ static void startGpuWarmup() {
         ID3D11Device* device = nullptr;
         ID3D11DeviceContext* ctx = nullptr;
         D3D_FEATURE_LEVEL fl;
-        D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-                          D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
-                          D3D11_SDK_VERSION, &device, &fl, &ctx);
+        HRESULT hr = D3D11CreateDevice(
+            nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
+            &device, &fl, &ctx);
         if (ctx) ctx->Release();
-        if (device && g_app && g_app->hwnd) {
+        if (FAILED(hr)) {
+            tintaLog("gpu: D3D11 hardware device FAILED hr=0x%08X "
+                     "(keeping software rendering)",
+                     (unsigned)hr);
+        } else if (device && g_app && g_app->hwnd) {
             g_warmupDevice = device;
             PostMessageW(g_app->hwnd, WM_APP_GPU_READY, 0, 0);
         } else if (device) {
@@ -99,7 +109,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void render(App& app);
 
 void render(App& app) {
-    if (!app.renderTarget) return;
+    if (!app.renderTarget) {
+        tintaLog("render: skipped (no render target)");
+        return;
+    }
 
     app.renderTarget->BeginDraw();
     app.drawCalls = 0;
@@ -108,7 +121,11 @@ void render(App& app) {
     // layout while it is open, so the normal paths would draw nonsense
     if (app.showPrintPreview) {
         renderPrintPreview(app);
-        app.renderTarget->EndDraw();
+        HRESULT hr = app.renderTarget->EndDraw();
+        if (FAILED(hr)) {
+            tintaLog("render: print-preview EndDraw failed hr=0x%08X",
+                     (unsigned)hr);
+        }
         return;
     }
 
@@ -1081,7 +1098,10 @@ render_document:
     if (app.confirmExitPending) renderConfirmExitDialog(app);
     if (app.createRefPending) renderCreateRefDialog(app);
 
-    app.renderTarget->EndDraw();
+    HRESULT hr = app.renderTarget->EndDraw();
+    if (FAILED(hr)) {
+        tintaLog("render: EndDraw failed hr=0x%08X", (unsigned)hr);
+    }
 }
 
 // --- Update check ---
@@ -1371,6 +1391,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app) {
                 COPYDATASTRUCT* data =
                     reinterpret_cast<COPYDATASTRUCT*>(lParam);
+                tintaLog("input: WM_COPYDATA type=%llu bytes=%lu",
+                         data ? (unsigned long long)data->dwData : 0,
+                         data ? data->cbData : 0);
                 if (data && tabReceiveCopyData(*app, hwnd, *data)) {
                     if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
                     SetForegroundWindow(hwnd);
@@ -1442,8 +1465,21 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_PAINT: {
             PAINTSTRUCT ps;
             BeginPaint(hwnd, &ps);
-            if (app) render(*app);
+            if (app) {
+                if (g_paintCount < 40 || g_paintCount % 100 == 0 ||
+                    !app->renderTarget) {
+                    tintaLog("paint #%u: rt=%d root=%d startPage=%d "
+                             "layoutComplete=%d w=%d h=%d rects=%zu runs=%zu",
+                             g_paintCount, app->renderTarget ? 1 : 0,
+                             app->root ? 1 : 0, startPageActive(*app) ? 1 : 0,
+                             app->layoutComplete ? 1 : 0, app->width,
+                             app->height, app->layoutRects.size(),
+                             app->layoutTextRuns.size());
+                }
+                render(*app);
+            }
             EndPaint(hwnd, &ps);
+            ++g_paintCount;
             return 0;
         }
 
@@ -1462,8 +1498,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         case WM_LBUTTONDOWN:
-            if (app) touchStopFling(*app, hwnd);
-            if (app) handleMouseDown(*app, hwnd, wParam, lParam);
+            if (app) {
+                tintaLog("input: WM_LBUTTONDOWN x=%d y=%d edit=%d settings=%d "
+                         "menu=%d chromeTop=%.1f",
+                         GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam),
+                         app->editMode ? 1 : 0, app->showSettings ? 1 : 0,
+                         app->showContextMenu ? 1 : 0,
+                         chromeTopHeight(*app));
+                touchStopFling(*app, hwnd);
+                handleMouseDown(*app, hwnd, wParam, lParam);
+            }
             return 0;
 
         case WM_POINTERDOWN:
@@ -1476,7 +1520,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_LBUTTONUP:
-            if (app) handleMouseUp(*app, hwnd, wParam, lParam);
+            if (app) {
+                tintaLog("input: WM_LBUTTONUP x=%d y=%d",
+                         GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+                handleMouseUp(*app, hwnd, wParam, lParam);
+            }
             return 0;
 
         case WM_ENTERSIZEMOVE:
@@ -1615,7 +1663,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_DROPFILES:
-            if (app) handleDropFiles(*app, hwnd, wParam);
+            if (app) {
+                tintaLog("input: WM_DROPFILES");
+                handleDropFiles(*app, hwnd, wParam);
+            }
             return 0;
 
         case WM_TIMER:
@@ -1762,9 +1813,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // driver initialized, so the warm-up device can go.
             if (app && !app->useHardwareRT) {
                 app->useHardwareRT = true;
+                tintaLog("gpu: hardware render target being created");
                 createRenderTarget(*app);
                 app->layoutDirty = true;
                 InvalidateRect(hwnd, nullptr, FALSE);
+            } else {
+                tintaLog("gpu: warm-up device finished (no target swap)");
             }
             if (g_warmupDevice) {
                 g_warmupDevice->Release();
@@ -1777,12 +1831,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // to input between slices
             if (app && !app->layoutDirty && !app->layoutComplete) {
                 bool done = layoutDocumentContinue(*app, 10000);
+                if (done) {
+                    tintaLog("layout: complete after chunk "
+                             "(content=%dx%.1f)",
+                             app->width, app->contentHeight);
+                }
                 InvalidateRect(hwnd, nullptr, FALSE);  // scrollbar grows as layout fills in
                 if (!done) PostMessage(hwnd, WM_APP_LAYOUT_CHUNK, 0, 0);
             }
             return 0;
 
         case WM_DESTROY:
+            tintaLog("window destroyed");
             KillTimer(hwnd, TIMER_FILE_WATCH);
             KillTimer(hwnd, 2); // TIMER_EDITOR_REPARSE
             KillTimer(hwnd, TIMER_CURSOR_BLINK);
@@ -1890,6 +1950,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 // Last-chance handler: writes %LOCALAPPDATA%\Tinta\crash.dmp so crash
 // reports from the field carry a usable stack
 static LONG WINAPI writeCrashDump(EXCEPTION_POINTERS* exceptionInfo) {
+    tintaLog("crash: unhandled exception 0x%08X, writing crash.dmp",
+             (unsigned)(exceptionInfo
+                            ? exceptionInfo->ExceptionRecord->ExceptionCode
+                            : 0));
     wchar_t path[MAX_PATH];
     DWORD len = GetEnvironmentVariableW(L"LOCALAPPDATA", path, MAX_PATH);
     if (len == 0 || len >= MAX_PATH) return EXCEPTION_CONTINUE_SEARCH;
@@ -1911,11 +1975,48 @@ static LONG WINAPI writeCrashDump(EXCEPTION_POINTERS* exceptionInfo) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+// Real Windows version regardless of the app manifest: GetVersionEx is
+// compatibility-masked on Windows 8.1+ (a manifest-less process reads 6.2),
+// RtlGetVersion from ntdll is not. Resolved at runtime like the
+// win7_compat.h shims; ntdll.dll is always loaded in a GUI process.
+static std::string osVersionString() {
+    struct OsVersionInfo {
+        ULONG size;
+        ULONG major;
+        ULONG minor;
+        ULONG build;
+        ULONG platform;
+        wchar_t csd[128];
+    };
+    static FARPROC fn = GetProcAddress(GetModuleHandleW(L"ntdll.dll"),
+                                       "RtlGetVersion");
+    if (fn) {
+        using Fn = LONG(WINAPI*)(OsVersionInfo*);
+        OsVersionInfo info = {};
+        info.size = sizeof(info);
+        if (reinterpret_cast<Fn>(fn)(&info) == 0) {
+            char buf[160];
+            sprintf_s(buf, _countof(buf), "Windows %lu.%lu (build %lu)",
+                      info.major, info.minor, info.build);
+            return buf;
+        }
+    }
+    return "Windows (unknown version)";
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     SetUnhandledExceptionFilter(writeCrashDump);
     // Enable per-monitor DPI V2 awareness (Windows 10 1703+); on Windows 7
     // the shim falls back to system-DPI awareness.
     win7compat::setPerMonitorV2DpiAwareness();
+
+    tintaLog("tinta v%d.%d.%d started (pid=%lu), %s, dpiAware=%d",
+             TINTA_VERSION_MAJOR, TINTA_VERSION_MINOR, TINTA_VERSION_PATCH,
+             (unsigned long)GetCurrentProcessId(), osVersionString().c_str(),
+             IsProcessDPIAware() ? 1 : 0);
+    // Resolves the launch folder ("current directory") before
+    // parkWorkingDirectory() moves the process into the system folder.
+    tintaLog("log file: %s", tintaLogPath().c_str());
 
     auto startupStart = Clock::now();
 
@@ -1976,6 +2077,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         ? app.languageSetting : detectSystemLanguage();
     app.keyOverrides = savedSettings.keyOverrides;
     applyKeymap(app, savedSettings);
+
+    tintaLog("settings loaded: window=%dx%d pos=%d,%d maximized=%d theme=%d "
+             "zoom=%.2f openInTabs=%d sessionTabs=%zu language=%s",
+             savedSettings.windowWidth, savedSettings.windowHeight,
+             savedSettings.windowX, savedSettings.windowY,
+             savedSettings.windowMaximized ? 1 : 0, app.currentThemeIndex,
+             app.zoomFactor, savedSettings.openInTabs ? 1 : 0,
+             savedSettings.sessionTabs.size(), savedSettings.language.c_str());
 
     // Parse command line
     std::string inputFile;
@@ -2047,6 +2156,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     exportPdfPath = resolveArgument(exportPdfPath);
     const std::string tutorialFile = toUtf8(resolveArgument(L"syntax.md"));
     parkWorkingDirectory();
+    tintaLog("command line: inputFile=%s edit=%d new=%d cascade=%d tabbed=%d "
+             "light=%d",
+             inputFile.c_str(), startInEditMode ? 1 : 0, quickNote ? 1 : 0,
+             cascadeWindow ? 1 : 0, app.forceTabStrip ? 1 : 0,
+             lightMode ? 1 : 0);
 
     // Single instance: a plain file launch joins the existing window as a
     // new tab (Win11 Notepad model). --new/--cascade windows and the
@@ -2107,6 +2221,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     wc.hIconSm = LoadIconW(hInstance, L"IDI_ICON1");
     wc.lpszClassName = L"Tinta";
     RegisterClassExW(&wc);
+    tintaLog("window class registered");
 
     // Validate the saved window position against the monitors that exist
     // NOW — a position saved on a since-disconnected screen (docked laptop,
@@ -2159,11 +2274,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         savedSettings.windowWidth, savedSettings.windowHeight,
         nullptr, nullptr, hInstance, nullptr
     );
+    if (!app.hwnd) {
+        tintaLog("window creation FAILED (lastError=%lu)",
+                 (unsigned long)GetLastError());
+    } else {
+        tintaLog("window created: hwnd=%p %dx%d at %d,%d",
+                 (void*)app.hwnd, savedSettings.windowWidth,
+                 savedSettings.windowHeight, windowX, windowY);
+    }
 
     app.metrics.windowInitUs = usElapsed(t0);
 
     // Get the DPI (per-monitor on Windows 10, system DPI on Windows 7)
     app.contentScale = win7compat::windowDpi(app.hwnd) / 96.0f;
+    tintaLog("dpi: contentScale=%.2f", app.contentScale);
 
     // Theme the native title bar before the window is ever shown
     applyWindowChrome(app);
@@ -2175,14 +2299,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     // Initialize D2D
     if (!initD2D(app)) {
+        tintaLog("initD2D failed");
         MessageBoxW(nullptr, tr(app, "error.d2d_init_failed"),
                    tr(app, "error.title"), MB_OK);
         return 1;
     }
+    tintaLog("D2D/DWrite initialized");
 
     // Create text formats and typography
     updateTextFormats(app);
     createTypography(app);
+    tintaLog("text formats and typography created");
 
     // Get window size
     RECT rc;
@@ -2193,10 +2320,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     // Create render target
     t0 = Clock::now();
     if (!createRenderTarget(app)) {
+        tintaLog("createRenderTarget failed");
         MessageBoxW(nullptr, tr(app, "error.render_target_failed"),
                    tr(app, "error.title"), MB_OK);
         return 1;
     }
+    tintaLog("render target created (%dx%d, hardware=%d)", app.width,
+             app.height, app.useHardwareRT ? 1 : 0);
     app.metrics.renderTargetUs = usElapsed(t0);
 
     // Load document
@@ -2212,6 +2342,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             for (const auto& e : app.root->children)
                 if (e->type == ElementType::Properties) observeFrontmatter(app, e->properties);
             annotationsParseSource(app);
+            tintaLog("document parsed: bytes=%zu blocks=%zu parseTimeUs=%zu",
+                     content.size(),
+                     result.root ? result.root->children.size() : 0,
+                     result.parseTimeUs);
+        } else {
+            tintaLog("document parse FAILED: path=%.*s bytes=%zu",
+                     (int)path.size(), path.data(), content.size());
         }
         return result.success;
     };
@@ -2220,9 +2357,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         // Use wide string path for ifstream to support non-ASCII paths (MSVC extension)
         std::wstring widePath = toWide(path);
         std::ifstream file(widePath);
-        if (!file) return false;
+        if (!file) {
+            tintaLog("file open FAILED: %s", path.c_str());
+            return false;
+        }
         std::stringstream buffer;
         buffer << file.rdbuf();
+        tintaLog("file loaded: %s (%zu bytes)", path.c_str(),
+                 buffer.str().size());
         return loadDocumentContent(buffer.str(), path);
     };
 
@@ -2287,6 +2429,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     }
 
     app.metrics.fileLoadUs = usElapsed(t0);
+    tintaLog("startup document: currentFile=%s root=%d startPage=%d",
+             app.currentFile.c_str(), app.root ? 1 : 0,
+             app.currentFile.empty() ? 1 : 0);
 
     // Resume the saved reading position (#77); new-file windows start in the
     // editor at the top instead
@@ -2312,6 +2457,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     } else {
         tabsInit(app);
     }
+    tintaLog("tabs initialized: count=%d active=%d",
+             (int)app.tabs.size(), app.activeTab);
 
     // Start file watch timer and record initial write time
     updateFileWriteTime(app);
@@ -2326,6 +2473,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     }
     UpdateWindow(app.hwnd);
     app.metrics.showWindowUs = usElapsed(t0);
+    tintaLog("window shown: %dx%d dpi=%.2f", app.width, app.height,
+             app.contentScale);
 
     // Update check: portable builds only, at most once a day, and only
     // long after startup has finished (10 s timer arms a worker thread)
@@ -2398,7 +2547,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     // Message loop
     MSG msg;
-    while (GetMessage(&msg, nullptr, 0, 0)) {
+    tintaLog("message loop started");
+    for (;;) {
+        int result = GetMessage(&msg, nullptr, 0, 0);
+        if (result <= 0) {
+            if (result < 0) {
+                tintaLog("message loop ERROR: GetMessage=%d lastError=%lu",
+                         result, (unsigned long)GetLastError());
+            }
+            break;
+        }
         if (msg.hwnd == app.hwnd && msg.message == WM_KEYDOWN) {
             // Give command shortcuts the first chance to consume a key.
             // Only unconsumed keystrokes generate WM_CHAR; no timed input
@@ -2409,6 +2567,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             DispatchMessage(&msg);
         }
     }
+    tintaLog("message loop exited (wParam=%llu)",
+             (unsigned long long)msg.wParam);
 
     g_app = nullptr;
     return (int)msg.wParam;

@@ -93,6 +93,7 @@ set(SOURCES
     src/plantuml_queue.cpp
     src/plantuml_app.cpp
     src/wordcount.cpp
+    src/log.cpp
 )
 
 set(HEADERS
@@ -126,6 +127,7 @@ set(HEADERS
     include/plantuml_queue.h
     include/plantuml_app.h
     include/wordcount.h
+    include/log.h
 )
 
 # Windows resource file (icon)
@@ -174,6 +176,13 @@ if(BUILD_TESTING)
     target_compile_definitions(win7_compat_tests PRIVATE
         TINTA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME win7_compat COMMAND win7_compat_tests)
+
+    # The diagnostic log module (tinta.log). Pure C++ plus Win32 file I/O,
+    # so the unit suite builds and runs anywhere and verifies the line
+    # format, append behavior and thread safety against a temp file.
+    add_executable(log_tests tests/log_tests.cpp src/log.cpp)
+    target_include_directories(log_tests PRIVATE include)
+    add_test(NAME diagnostic_log COMMAND log_tests)
 
     # Exercise the real input handlers and editor with a message-only test
     # window, including layout-dependent character sequences (#195).

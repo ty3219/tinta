@@ -9,6 +9,7 @@
 #include "search_panel.h"
 #include "overlays.h"
 #include "win7_compat.h"
+#include "log.h"
 
 #include "document.h"
 #include "drafts.h"
@@ -180,7 +181,11 @@ void tabActivate(App& app, HWND hwnd, int index) {
     auto source = readViewerSource(destination.path);
     if (!source && app.keepDeletedTabs) source = destination.viewerSource;
     if (!source && destination.editMode) source = toUtf8(destination.editorText);
-    if (!destination.path.empty() && !source) return;
+    if (!destination.path.empty() && !source) {
+        tintaLog("tabs: activate %d failed to read '%s'", index,
+                 destination.path.c_str());
+        return;
+    }
 
     // Leaving an embedded Learn document: an empty tab activated later
     // shows the launcher again
@@ -194,6 +199,7 @@ void tabActivate(App& app, HWND hwnd, int index) {
     if (!tab.path.empty()) {
         // openDocumentInViewer saves the old reading position and restores
         // the new one; parse + viewport-first layout makes this feel instant
+        tintaLog("tabs: activating %d -> '%s'", index, tab.path.c_str());
         openDocumentSourceInViewer(app, toWide(tab.path), *source);
         if (app.keepDeletedTabs) tab.viewerSource = std::move(source);
         tab.fileMissing = GetFileAttributesW(toWide(tab.path).c_str()) ==
@@ -240,6 +246,8 @@ void tabActivate(App& app, HWND hwnd, int index) {
 void tabOpenPath(App& app, HWND hwnd, const std::string& utf8Path,
                  bool activate, int insertBefore) {
     tabsInit(app);
+    tintaLog("tabs: open '%s' activate=%d", utf8Path.c_str(),
+             activate ? 1 : 0);
     // A path that is already open switches to its tab instead of duplicating
     for (size_t i = 0; i < app.tabs.size(); i++) {
         const std::string& existing =
@@ -255,7 +263,11 @@ void tabOpenPath(App& app, HWND hwnd, const std::string& utf8Path,
     tab.path = utf8Path;
     tab.title = titleForPath(app, utf8Path);
     cacheViewerSource(app, tab);
-    if (!utf8Path.empty() && !tab.viewerSource && !std::ifstream(toWide(utf8Path))) return;
+    if (!utf8Path.empty() && !tab.viewerSource &&
+        !std::ifstream(toWide(utf8Path))) {
+        tintaLog("tabs: cannot read '%s'", utf8Path.c_str());
+        return;
+    }
     int index = insertBefore < 0 ? (int)app.tabs.size()
                                : std::min(insertBefore, (int)app.tabs.size());
     app.tabs.insert(app.tabs.begin() + index, std::move(tab));

@@ -1,5 +1,6 @@
 #include "frontmatter_ui.h"
 #include "input.h"
+#include "log.h"
 #include "link_target.h"
 #include "network_path.h"
 #include "win7_compat.h"
@@ -253,10 +254,16 @@ void handleSelectScrollTimer(App& app, HWND hwnd) {
 // Shared by the folder browser's item clicks, path input, and new-file flow.
 bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     std::ifstream file(fullPath);
-    if (!file) return false;
+    if (!file) {
+        tintaLog("viewer: file open FAILED '%s'", toUtf8(fullPath).c_str());
+        return false;
+    }
     std::stringstream buffer;
     buffer << file.rdbuf();
-    if (file.bad()) return false;
+    if (file.bad()) {
+        tintaLog("viewer: file read FAILED '%s'", toUtf8(fullPath).c_str());
+        return false;
+    }
     return openDocumentSourceInViewer(app, fullPath, buffer.str());
 }
 
@@ -274,7 +281,14 @@ void persistLeavingPosition(App& app) {
 bool openDocumentSourceInViewer(App& app, const std::wstring& fullPath,
                                 const std::string& source) {
     auto result = parseDocument(app.parser, source, fullPath);
-    if (!result.success) return false;
+    if (!result.success) {
+        tintaLog("viewer: parse FAILED '%s'", toUtf8(fullPath).c_str());
+        return false;
+    }
+    tintaLog("viewer: opened '%s' (%zu bytes, %zu blocks, parse %zu us)",
+             toUtf8(fullPath).c_str(), source.size(),
+             result.root ? result.root->children.size() : 0,
+             result.parseTimeUs);
 
     // Review annotations (#126): keep the raw source and derive marks from it
     app.sourceText = source;
@@ -1954,10 +1968,12 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
     }
     if (appMenuButtonAt(app, (float)GET_X_LPARAM(lParam), (float)GET_Y_LPARAM(lParam))) {
         if (appMenuAvailable(app)) {
+            tintaLog("input: mousedown on the app menu button (opens menu)");
             app.appMenuPressed = true;
             app.appMenuPressPoint = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
             SetCapture(hwnd);
         } else {
+            tintaLog("input: mousedown on the app menu button (unavailable)");
             app.swallowNextMouseUp = true;
         }
         return;
@@ -1990,6 +2006,8 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             return;
         }
         if ((float)my < chromeTopHeight(app) && !app.confirmExitPending) {
+            tintaLog("input: mousedown on the tab strip (y=%d chrome=%.1f)",
+                     my, chromeTopHeight(app));
             tabStripMouseDown(app, hwnd, mx, my, false);
             app.swallowNextMouseUp = true;
             return;
@@ -4441,6 +4459,7 @@ void handleDropFiles(App& app, HWND hwnd, WPARAM wParam) {
     // drop on a single-document window is where the tab strip first appears
     HDROP hDrop = (HDROP)wParam;
     UINT count = DragQueryFileW(hDrop, 0xFFFFFFFF, nullptr, 0);
+    tintaLog("input: dropped %lu file(s)", (unsigned long)count);
     bool activated = false;
     for (UINT i = 0; i < count; i++) {
         wchar_t wpath[MAX_PATH];

@@ -17,6 +17,7 @@
 #include "input.h"
 #include "sidepanels.h"
 #include "path_utils.h"
+#include "log.h"
 
 #include "export.h"
 
@@ -1938,6 +1939,7 @@ bool quickNoteEmptyStateActive(const App& app) {
 }
 
 void openFileDialog(App& app, HWND hwnd) {
+    tintaLog("dialog: File > Open invoked");
     wchar_t path[MAX_PATH] = L"";
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
@@ -1952,7 +1954,11 @@ void openFileDialog(App& app, HWND hwnd) {
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR |
                 OFN_HIDEREADONLY;
-    if (!runOpenFileDialog(ofn)) return;
+    if (!runOpenFileDialog(ofn)) {
+        tintaLog("dialog: File > Open cancelled");
+        return;
+    }
+    tintaLog("dialog: File > Open picked '%s'", toUtf8(path).c_str());
 
     // Only an empty launcher/note is replaced. A document or unsaved
     // buffer stays in its tab, including when the picked path is open.

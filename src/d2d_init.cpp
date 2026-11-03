@@ -3,6 +3,7 @@
 #include "math_render.h"
 #include "utils.h"
 #include "i18n.h"
+#include "log.h"
 
 #include <objbase.h>
 #include <dwmapi.h>
@@ -60,7 +61,10 @@ bool initD2D(App& app) {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
     HRESULT hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &app.d2dFactory);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        tintaLog("initD2D: D2D1CreateFactory failed hr=0x%08X", (unsigned)hr);
+        return false;
+    }
 
     app.metrics.d2dInitUs = usElapsed(t0);
     t0 = Clock::now();
@@ -70,7 +74,11 @@ bool initD2D(App& app) {
     if (app.dwriteFactory) {
         app.dwriteFactory->CreateTextAnalyzer(&app.textAnalyzer);
     }
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        tintaLog("initD2D: DWriteCreateFactory failed hr=0x%08X",
+                 (unsigned)hr);
+        return false;
+    }
 
     app.metrics.dwriteInitUs = usElapsed(t0);
 
@@ -78,6 +86,10 @@ bool initD2D(App& app) {
     hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
         IID_PPV_ARGS(&app.wicFactory));
     // WIC failure is non-fatal (images just won't render)
+    if (FAILED(hr)) {
+        tintaLog("initD2D: WIC factory failed hr=0x%08X (images disabled)",
+                 (unsigned)hr);
+    }
 
     return true;
 }
@@ -782,10 +794,21 @@ bool createRenderTarget(App& app) {
         D2D1::HwndRenderTargetProperties(app.hwnd, size, D2D1_PRESENT_OPTIONS_IMMEDIATELY),
         &app.renderTarget
     );
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        tintaLog("createRenderTarget: CreateHwndRenderTarget failed "
+                 "hr=0x%08X (size=%lux%lu, hardware=%d)",
+                 (unsigned)hr, (unsigned long)size.width,
+                 (unsigned long)size.height, app.useHardwareRT ? 1 : 0);
+        return false;
+    }
 
     hr = app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1), &app.brush);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        tintaLog("createRenderTarget: CreateSolidColorBrush failed "
+                 "hr=0x%08X",
+                 (unsigned)hr);
+        return false;
+    }
 
     // Cache device context for color emoji rendering
     if (app.deviceContext) { app.deviceContext->Release(); app.deviceContext = nullptr; }
