@@ -57,6 +57,18 @@ static App* g_app = nullptr;
 // plus every 100th are enough to see whether the window keeps repainting
 // after a document opens or a click lands, without flooding the log.
 static unsigned g_paintCount = 0;
+// Which section of the frame was being drawn when an error struck. Plain
+// pointer, no per-frame allocation; EndDraw failures log it so the Windows 7
+// blank-window report names the offending section instead of guessing.
+static const char* g_renderStage = "start";
+// Bounded recovery after a failed EndDraw: a failed draw leaves the render
+// target in an error state where nothing more draws, so recreate it (the
+// standard device-reset pattern) instead of leaving a permanently blank
+// window. Bounded so a persistent bad command cannot churn through target
+// recreations forever; past the budget the failure is only logged, with the
+// stage that caused it.
+static int g_endDrawFailures = 0;
+static const int kMaxEndDrawRecreates = 3;
 
 // Initializes the GPU driver on a worker thread after the first (software)
 // frame is on screen. D3D device creation costs ~200 ms dominated by
@@ -114,6 +126,7 @@ void render(App& app) {
         return;
     }
 
+    g_renderStage = "print-preview";
     app.renderTarget->BeginDraw();
     app.drawCalls = 0;
 
@@ -123,9 +136,11 @@ void render(App& app) {
         renderPrintPreview(app);
         HRESULT hr = app.renderTarget->EndDraw();
         if (FAILED(hr)) {
-            tintaLog("render: print-preview EndDraw failed hr=0x%08X",
-                     (unsigned)hr);
+            tintaLog("render: print-preview EndDraw failed hr=0x%08X at "
+                     "stage=%s",
+                     (unsigned)hr, g_renderStage);
         }
+        g_renderStage = "idle";
         return;
     }
 
@@ -163,6 +178,7 @@ void render(App& app) {
         }
     }
 
+    g_renderStage = "document";
     // Incremental layout grows contentHeight in small steps. Keep scrollbar
     // visibility latched for the duration of that layout and only let its
     // extent grow, so the right edge cannot blink as chunks arrive.
@@ -765,6 +781,7 @@ render_document:
     }
 
     // Determine scrollbar visibility
+    g_renderStage = "scrollbars";
     bool needsVScroll = app.verticalScrollbarVisible;
     bool needsHScroll = app.contentWidth > documentWidth;
 
@@ -998,6 +1015,7 @@ render_document:
     }
 
     // Review annotations: text tint, marker rail, hover preview (#126)
+    g_renderStage = "annotations";
     renderAnnotations(app);
 
     // Link peek popup (dwell over a local .md link)
@@ -1039,6 +1057,7 @@ render_document:
     }
 
     // Render overlays (search overlay handled separately for edit mode)
+    g_renderStage = "chrome";
     if (app.showSearch && !app.editMode) renderSearchOverlay(app);
     if (app.showFolderBrowser) renderFolderBrowser(app);
     // The Contents slot: the outline, or the search results (#246)
@@ -1063,14 +1082,17 @@ render_document:
     }
 
     // Ctrl+G's go-to-line prompt, at the top of the pane it acts on (#276)
+    g_renderStage = "goto-line";
     renderGotoLinePrompt(app);
 
     // Signal chips: every notification, one bottom-right system (t13).
     // Drawn after the edit-mode clip pops and above the side panels, so
     // chips reach the corner in both modes and over a pinned Contents
+    g_renderStage = "signals";
     renderSignalChips(app);
 
     // Title-bar tab strip: the caption itself, above every panel
+    g_renderStage = "tab-strip";
     renderTabStrip(app);
 
     // Edit-mode tool rail (design t8): covers the strip's left corner
@@ -1082,6 +1104,7 @@ render_document:
         renderEditorWordCount(app);
     }
     // A resting pointer's tab: full name and folder below the strip
+    g_renderStage = "tab-hover";
     renderTabHoverCard(app);
     if (app.showThemeChooser) renderThemeChooser(app);
     if (app.showHelp) renderHelpOverlay(app);
@@ -1090,6 +1113,7 @@ render_document:
     if (app.showThemeEditor) renderThemeEditor(app);
     if (app.showShortcutEditor) renderShortcutEditor(app);
 
+    g_renderStage = "menus";
     renderTabSwitcher(app);
     renderTabMenu(app);
     if (app.showContextMenu) renderContextMenu(app);
@@ -1098,10 +1122,27 @@ render_document:
     if (app.confirmExitPending) renderConfirmExitDialog(app);
     if (app.createRefPending) renderCreateRefDialog(app);
 
+    g_renderStage = "end";
     HRESULT hr = app.renderTarget->EndDraw();
     if (FAILED(hr)) {
-        tintaLog("render: EndDraw failed hr=0x%08X", (unsigned)hr);
+        tintaLog("render: EndDraw failed hr=0x%08X at stage=%s",
+                 (unsigned)hr, g_renderStage);
+        // A failed EndDraw leaves the render target in an error state where
+        // nothing more draws. Recreate it so the next frame starts on a
+        // clean target (the standard device-reset pattern), bounded so a
+        // persistent bad command cannot churn through recreations forever.
+        if (g_endDrawFailures < kMaxEndDrawRecreates) {
+            ++g_endDrawFailures;
+            tintaLog("render: recreating render target after EndDraw "
+                     "failure (attempt %d of %d)",
+                     g_endDrawFailures, kMaxEndDrawRecreates);
+            createRenderTarget(app);
+            InvalidateRect(app.hwnd, nullptr, FALSE);
+        }
+    } else {
+        g_endDrawFailures = 0;
     }
+    g_renderStage = "idle";
 }
 
 // --- Update check ---

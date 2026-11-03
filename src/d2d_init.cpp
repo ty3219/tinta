@@ -4,6 +4,7 @@
 #include "utils.h"
 #include "i18n.h"
 #include "log.h"
+#include "textparams.h"
 
 #include <objbase.h>
 #include <dwmapi.h>
@@ -818,26 +819,46 @@ bool createRenderTarget(App& app) {
     // Enable high-quality text
     app.renderTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
 
-    // Create custom rendering params for improved text quality
-    IDWriteRenderingParams* defaultParams = nullptr;
-    IDWriteRenderingParams* customParams = nullptr;
+    // Create custom rendering params for improved text quality. These use
+    // DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC, which only exists in
+    // DirectWrite 1.1+ (Windows 8+, or the Windows 7 Platform Update).
+    // DirectWrite 1.0 renumbered the DWRITE_RENDERING_MODE values, so the
+    // NATURAL_SYMMETRIC constant compiled against the Windows 10 SDK means
+    // a different mode there. Applied on the Windows 7 software rasterizer
+    // those params made every text draw fail: EndDraw returned E_INVALIDARG
+    // on each paint and the window stayed blank (the Windows 7 blank-window
+    // report). The custom params are therefore only applied to
+    // hardware-accelerated render targets with DirectWrite 1.1+; everything
+    // else keeps the render target's default text rendering params.
+    IDWriteFactory1* factory1 = nullptr;
+    const bool dwrite11 = SUCCEEDED(app.dwriteFactory->QueryInterface(
+        __uuidof(IDWriteFactory1),
+        reinterpret_cast<void**>(&factory1)));
+    if (factory1) factory1->Release();
 
-    app.dwriteFactory->CreateRenderingParams(&defaultParams);
-    if (defaultParams) {
-        app.dwriteFactory->CreateCustomRenderingParams(
-            defaultParams->GetGamma(),
-            defaultParams->GetEnhancedContrast(),
-            1.0f,  // ClearType level
-            defaultParams->GetPixelGeometry(),
-            DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
-            &customParams
-        );
-        defaultParams->Release();
-
-        if (customParams) {
-            app.renderTarget->SetTextRenderingParams(customParams);
-            customParams->Release();
+    if (textparams::choose(dwrite11, app.useHardwareRT) ==
+        textparams::kCustomNaturalSymmetric) {
+        IDWriteRenderingParams* defaultParams = nullptr;
+        IDWriteRenderingParams* customParams = nullptr;
+        app.dwriteFactory->CreateRenderingParams(&defaultParams);
+        if (defaultParams) {
+            app.dwriteFactory->CreateCustomRenderingParams(
+                defaultParams->GetGamma(),
+                defaultParams->GetEnhancedContrast(),
+                1.0f,  // ClearType level
+                defaultParams->GetPixelGeometry(),
+                DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
+                &customParams);
+            defaultParams->Release();
+            if (customParams) {
+                app.renderTarget->SetTextRenderingParams(customParams);
+                customParams->Release();
+            }
         }
+    } else {
+        tintaLog("render: keeping default text rendering params "
+                 "(dwrite11=%d hardware=%d)",
+                 dwrite11 ? 1 : 0, app.useHardwareRT ? 1 : 0);
     }
 
     return true;

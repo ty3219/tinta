@@ -32,7 +32,7 @@ Instrumented call sites:
 | --- | --- |
 | `src/main_d2d.cpp` startup | Version, pid, real OS version (RtlGetVersion), DPI awareness, log path, settings summary, command line, window class/window, DPI, D2D init, render target, document load result, tab count, show, message-loop start/exit/error, crash filter entry, D3D11 warm-up failure |
 | `src/main_d2d.cpp` WndProc | WM_PAINT (first 40 + every 100th, with render-target/root/layout/rect/run counts), WM_LBUTTONDOWN/UP coordinates and overlay state, WM_COPYDATA, WM_DROPFILES, WM_APP_GPU_READY, WM_APP_LAYOUT_CHUNK completion, WM_DESTROY |
-| `src/main_d2d.cpp` render() | Early return without a render target; `EndDraw` failures |
+| `src/main_d2d.cpp` render() | Early return without a render target; `EndDraw` failures, now naming the drawing stage (`stage=document`, `stage=tab-strip`, ...) and a bounded render-target recreation after a failed `EndDraw` |
 | `src/d2d_init.cpp` | `D2D1CreateFactory` / `DWriteCreateFactory` / WIC / `CreateHwndRenderTarget` / brush `HRESULT` failures |
 | `src/input.cpp` | `openDocumentInViewer` open/read/parse failures, `openDocumentSourceInViewer` success (path, bytes, blocks, parse time), drop count, app-menu and tab-strip hit decisions |
 | `src/tabs.cpp` | `tabOpenPath` open/cannot-read, `tabActivate` read failure and activation |

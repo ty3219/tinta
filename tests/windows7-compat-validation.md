@@ -103,7 +103,12 @@ performed here:
 
 1. **Startup** on a Windows 7 SP1 x64 VM or machine: run `tinta.exe` and open
    `tests/fixtures/windows7-compat.md`. There must be no "procedure entry
-   point" dialog; the window opens and renders.
+   point" dialog; the window opens and renders. The first real log from a
+   Windows 7 machine showed `render: EndDraw failed hr=0x80070057` on every
+   paint (the blank-window report); the fix for that — custom DirectWrite
+   rendering params are now limited to DWrite 1.1+ hardware targets, and
+   EndDraw failures log the drawing stage and recreate the target — is
+   recorded in `win7-text-params-validation.md`.
 2. **DPI**: at 96 DPI and 120 DPI system scaling, text and controls scale and
    stay crisp (system-DPI aware).
 3. **Core viewer**: headings, tables, lists, emphasis, links, quotes, code,

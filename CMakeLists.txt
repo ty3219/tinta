@@ -103,6 +103,7 @@ set(HEADERS
     include/settings.h
     include/keymap.h
     include/d2d_init.h
+    include/textparams.h
     include/syntax.h
     include/utils.h
     include/search.h
@@ -176,6 +177,15 @@ if(BUILD_TESTING)
     target_compile_definitions(win7_compat_tests PRIVATE
         TINTA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME win7_compat COMMAND win7_compat_tests)
+
+    # The DirectWrite 1.0/1.1 text rendering-parameter decision: custom
+    # NATURAL_SYMMETRIC params are only applied to hardware-accelerated
+    # render targets on DirectWrite 1.1+ (Windows 7's DWrite 1.0 renumbered
+    # the rendering modes, so applying them there makes text draws fail at
+    # EndDraw). Pure C++ so it builds and runs anywhere.
+    add_executable(textparams_tests tests/textparams_tests.cpp)
+    target_include_directories(textparams_tests PRIVATE include)
+    add_test(NAME textparams COMMAND textparams_tests)
 
     # The diagnostic log module (tinta.log). Pure C++ plus Win32 file I/O,
     # so the unit suite builds and runs anywhere and verifies the line
