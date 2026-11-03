@@ -97,7 +97,7 @@ void testThreadSafety() {
     std::atomic<int> started{0};
     std::vector<std::thread> workers;
     for (int t = 0; t < kThreads; ++t) {
-        workers.emplace_back([t, &started] {
+        workers.emplace_back([t, &started, kLinesEach] {
             ++started;
             for (int i = 0; i < kLinesEach; ++i) {
                 tintaLog("thread %d line %d", t, i);
