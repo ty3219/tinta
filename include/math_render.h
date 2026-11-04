@@ -38,7 +38,8 @@ void mathBoxDraw(App& app, const MathBoxPtr& box, float x, float y,
 // Same, into an arbitrary target (offscreen export rasterization)
 void mathBoxDrawTo(ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush,
                    const MathBoxPtr& box, float x, float y,
-                   const D2D1_COLOR_F& color);
+                   const D2D1_COLOR_F& color,
+                   D2D1_DRAW_TEXT_OPTIONS textOptions);
 
 // Push the box's runs/rules/lines into the retained paint lists at (x, y).
 // Run layouts are AddRef'd: the retained list releases its references on

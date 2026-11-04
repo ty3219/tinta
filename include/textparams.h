@@ -1,5 +1,5 @@
 #pragma once
-// Text rendering-parameter compatibility between DirectWrite 1.0 and 1.1.
+// Text rendering compatibility between DirectWrite 1.0 and 1.1 on Windows 7.
 //
 // Tinta's custom text rendering params request DWRITE_RENDERING_MODE_
 // NATURAL_SYMMETRIC, a mode that exists in DirectWrite 1.1+ (Windows 8
@@ -19,3 +19,18 @@ inline Choice choose(bool dwrite11, bool hardwareTarget) {
                                         : kDefaultParams;
 }
 }  // namespace textparams
+
+namespace colorfont {
+// Color glyph runs (D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT) are a
+// Windows 8.1+ Direct2D feature. On Windows 7 the Direct2D software
+// rasterizer - the fallback when no D3D11 device is available - accepts
+// the flag but fails every EndDraw with E_INVALIDARG, which is the second
+// Windows 7 blank-window report (EndDraw hr=0x80070057 on every paint,
+// even with the custom rendering params fix already in place). Color
+// fonts are therefore only requested when DirectWrite 1.1+ is present AND
+// the render target is hardware-accelerated; everywhere else text draws
+// with the plain glyph path (monochrome emoji, same layout).
+inline bool enabled(bool dwrite11, bool hardwareTarget) {
+    return dwrite11 && hardwareTarget;
+}
+}  // namespace colorfont

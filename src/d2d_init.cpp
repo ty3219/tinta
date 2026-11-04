@@ -835,6 +835,7 @@ bool createRenderTarget(App& app) {
         __uuidof(IDWriteFactory1),
         reinterpret_cast<void**>(&factory1)));
     if (factory1) factory1->Release();
+    app.dwrite11 = dwrite11;
 
     if (textparams::choose(dwrite11, app.useHardwareRT) ==
         textparams::kCustomNaturalSymmetric) {
@@ -858,6 +859,16 @@ bool createRenderTarget(App& app) {
     } else {
         tintaLog("render: keeping default text rendering params "
                  "(dwrite11=%d hardware=%d)",
+                 dwrite11 ? 1 : 0, app.useHardwareRT ? 1 : 0);
+    }
+
+    // Color glyph runs (ENABLE_COLOR_FONT) are a Windows 8.1+ D2D feature.
+    // On Windows 7 the software rasterizer fails every EndDraw when the
+    // flag is used (the second blank-window log), so it is only requested
+    // on DirectWrite 1.1+ hardware targets; this line makes the next
+    // diagnostic log show which path a frame took.
+    if (!colorfont::enabled(dwrite11, app.useHardwareRT)) {
+        tintaLog("render: color fonts off (dwrite11=%d hardware=%d)",
                  dwrite11 ? 1 : 0, app.useHardwareRT ? 1 : 0);
     }
 

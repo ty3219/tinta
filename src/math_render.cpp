@@ -1,5 +1,6 @@
 #include "math_render.h"
 #include "math_parser.h"
+#include "textparams.h"
 
 #include <algorithm>
 #include <cmath>
@@ -716,13 +717,14 @@ void mathExpandLine(const MathBoxPtr& box, float textBaseline, float lineHeight,
 
 void mathBoxDrawTo(ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush,
                    const MathBoxPtr& box, float x, float y,
-                   const D2D1_COLOR_F& color) {
+                   const D2D1_COLOR_F& color,
+                   D2D1_DRAW_TEXT_OPTIONS textOptions) {
     if (!box || !target || !brush) return;
     brush->SetColor(color);
     for (const auto& run : box->runs) {
         target->DrawTextLayout(
             D2D1::Point2F(x + run.x, y + run.y), run.layout, brush,
-            D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+            textOptions);
     }
     for (const auto& rule : box->rules) {
         target->FillRectangle(
@@ -740,7 +742,15 @@ void mathBoxDrawTo(ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush,
 
 void mathBoxDraw(App& app, const MathBoxPtr& box, float x, float y,
                  const D2D1_COLOR_F& color) {
-    mathBoxDrawTo(app.renderTarget, app.brush, box, x, y, color);
+    // Color glyph runs are a Windows 8.1+ D2D feature; the Windows 7
+    // software rasterizer fails EndDraw with E_INVALIDARG when the flag is
+    // used (the second blank-window log). Only request them on DirectWrite
+    // 1.1+ hardware targets; software targets draw the plain glyph path.
+    const D2D1_DRAW_TEXT_OPTIONS options =
+        colorfont::enabled(app.dwrite11, app.useHardwareRT)
+            ? D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT
+            : D2D1_DRAW_TEXT_OPTIONS_NONE;
+    mathBoxDrawTo(app.renderTarget, app.brush, box, x, y, color, options);
 }
 
 void mathBoxRetain(App& app, const MathBoxPtr& box, float x, float y,

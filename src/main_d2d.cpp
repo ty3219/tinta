@@ -5,6 +5,7 @@
 #include "app.h"
 #include "win7_compat.h"
 #include "log.h"
+#include "textparams.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -558,7 +559,13 @@ render_document:
         }
         app.brush->SetColor(run.color);
         D2D1_POINT_2F drawPos = D2D1::Point2F(run.pos.x - app.scrollX, run.pos.y - app.scrollY);
-        if (app.deviceContext) {
+        // Color glyph runs (ENABLE_COLOR_FONT) are a Windows 8.1+ D2D
+        // feature; the Windows 7 software rasterizer fails EndDraw with
+        // E_INVALIDARG when the flag is used (the second blank-window log:
+        // dwrite11=1 hardware=0). Only request them on DirectWrite 1.1+
+        // hardware targets; software targets draw the plain glyph path.
+        if (app.deviceContext &&
+            colorfont::enabled(app.dwrite11, app.useHardwareRT)) {
             app.deviceContext->DrawTextLayout(drawPos, run.layout, app.brush,
                 D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
         } else {

@@ -103,7 +103,8 @@ bool rasterize(const std::vector<MathBoxPtr>& boxes, const wchar_t* path = nullp
     target->Clear(D2D1::ColorF(D2D1::ColorF::White));
     float y = 16;
     for (const auto& box : boxes) {
-        mathBoxDrawTo(target.Get(), brush.Get(), box, 16, y, D2D1::ColorF(0x17212B));
+        mathBoxDrawTo(target.Get(), brush.Get(), box, 16, y,
+                      D2D1::ColorF(0x17212B), D2D1_DRAW_TEXT_OPTIONS_NONE);
         y += std::ceil(mathBoxHeight(box)) + 24;
     }
     if (FAILED(target->EndDraw())) return false;

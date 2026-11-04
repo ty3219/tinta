@@ -19,6 +19,7 @@
 #include "plantuml_queue.h"
 #include "render.h"
 #include "utils.h"
+#include "textparams.h"
 
 #include <objbase.h>
 #include <ole2.h>
@@ -570,7 +571,10 @@ bool mathToPng(App& app, const std::string& tex, bool display,
     if (!rt.open(app, width, height)) return false;
     rt.target->BeginDraw();
     rt.target->Clear(app.theme.background);
-    mathBoxDrawTo(rt.target, rt.brush, box, 0, 0, app.theme.text);
+    mathBoxDrawTo(rt.target, rt.brush, box, 0, 0, app.theme.text,
+                  colorfont::enabled(app.dwrite11, app.useHardwareRT)
+                      ? D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT
+                      : D2D1_DRAW_TEXT_OPTIONS_NONE);
     if (FAILED(rt.target->EndDraw())) return false;
     png = encodeWicPng(app, rt.bitmap, rt.width, rt.height);
     logicalWidth = width / kRasterScale;

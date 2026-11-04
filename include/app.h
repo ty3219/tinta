@@ -313,6 +313,10 @@ struct App {
     // The warm-up thread flips this and the target is recreated on
     // WM_APP_GPU_READY, after the first frame is already on screen.
     bool useHardwareRT = false;
+    // DirectWrite 1.1 detected at render-target creation (IDWriteFactory1
+    // QueryInterface). Set in createRenderTarget; text compatibility
+    // decisions (custom rendering params, color fonts) key off it.
+    bool dwrite11 = false;
 
     // Cached dashed stroke for mermaid edges (factory object: created once,
     // survives render-target recreation)

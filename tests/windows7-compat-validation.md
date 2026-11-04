@@ -109,6 +109,11 @@ performed here:
    rendering params are now limited to DWrite 1.1+ hardware targets, and
    EndDraw failures log the drawing stage and recreate the target — is
    recorded in `win7-text-params-validation.md`.
+   The follow-up log from the same class of machine (dwrite11=1 hardware=0,
+   EndDraw still failing on every paint) traced the remaining failure to the
+   color-font drawing option on the software rasterizer; that second fix is
+   recorded in `win7-color-fonts-validation.md` and covered by
+   `tests/fixtures/win7-color-fonts.md`.
 2. **DPI**: at 96 DPI and 120 DPI system scaling, text and controls scale and
    stay crisp (system-DPI aware).
 3. **Core viewer**: headings, tables, lists, emphasis, links, quotes, code,

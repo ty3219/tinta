@@ -1,5 +1,13 @@
 # Windows 7 text-params fix (the blank-window report)
 
+> **Follow-up (second log):** the text-params fix alone did not resolve the
+> Windows 7 blank window. The next `tinta.log` ran this fixed build and
+> still showed `EndDraw failed hr=0x80070057` on every paint, with
+> `dwrite11=1 hardware=0` — DirectWrite 1.1 present, software rasterizer.
+> The real cause on that machine is the color-font drawing option; see
+> `win7-color-fonts-validation.md` for the second fix. This document keeps
+> the first fix's record.
+
 ## Goal
 
 A Windows 7 user reported that `tinta.exe` starts but the window stays

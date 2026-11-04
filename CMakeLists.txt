@@ -187,6 +187,15 @@ if(BUILD_TESTING)
     target_include_directories(textparams_tests PRIVATE include)
     add_test(NAME textparams COMMAND textparams_tests)
 
+    # The DirectWrite 1.1 color-font drawing decision: D2D1_DRAW_TEXT_OPTIONS_
+    # ENABLE_COLOR_FONT is only used on hardware-accelerated render targets on
+    # DirectWrite 1.1+ (the Windows 7 software rasterizer fails every EndDraw
+    # with E_INVALIDARG when the flag is used, the second blank-window log).
+    # Pure C++ so it builds and runs anywhere.
+    add_executable(colorfont_tests tests/colorfont_tests.cpp)
+    target_include_directories(colorfont_tests PRIVATE include)
+    add_test(NAME colorfont COMMAND colorfont_tests)
+
     # The diagnostic log module (tinta.log). Pure C++ plus Win32 file I/O,
     # so the unit suite builds and runs anywhere and verifies the line
     # format, append behavior and thread safety against a temp file.
